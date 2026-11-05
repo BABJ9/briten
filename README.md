@@ -2,7 +2,7 @@
 
 A dark/gold Aurapay-bm frontend and Node.js API. **Render hosts the app. Supabase is the only authentication and database backend.** Hatchable SDKs and Hatchable backend configuration have been removed.
 
-> **GitHub upload status (2026-11-05):** The README, package manifest, `.gitignore`, `.env.example`, and Supabase schema notes are committed. The updated archive contains the complete source changes, but `server.js` and the `public/` source files have not yet been committed individually. Do not deploy this repository until those source files are added.
+> **GitHub upload status (2026-11-05):** The README, package manifest, `.gitignore`, `.env.example`, Supabase schema notes, `public/login.html`, `public/theme.css`, and `public/app.js` are committed. `server.js` and `public/index.html` remain to be committed from the updated archive. Do not deploy this repository until those two source files are added.
 
 ## What changed
 
