@@ -16,20 +16,15 @@
       </div>
       <div class="eyebrow">Secure access</div>
       <h1 style="font-size:30px;letter-spacing:-.05em;margin:10px 0">Welcome back.</h1>
-      <p class="muted" style="font-size:14px;line-height:1.6;margin-bottom:25px">Sign in or create your account with a one-time verification code sent to your email.</p>
-      <form @submit.prevent="step==='email'?send():verify()">
+      <p class="muted" style="font-size:14px;line-height:1.6;margin-bottom:25px">Sign in or create your account with a secure sign-in link sent to your email.</p>
+      <form @submit.prevent="send()">
         <label class="small-label" for="email">Email address</label>
-        <input class="field" style="margin:8px 0 14px" id="email" type="email" x-model="email" autocomplete="email" placeholder="you@example.com" required :disabled="step==='code'">
-        <template x-if="step==='code'">
-          <div>
-            <label class="small-label" for="code">Verification code</label>
-            <input class="field" style="margin:8px 0 14px;letter-spacing:.25em" id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" x-model="code" placeholder="Enter code" required>
-          </div>
-        </template>
-        <button class="btn btn-gold" style="width:100%" type="submit" :disabled="busy" x-text="busy?'Please wait…':step==='email'?'Send verification code':'Verify and sign in'"></button>
+        <input class="field" style="margin:8px 0 14px" id="email" type="email" x-model="email" autocomplete="email" placeholder="you@example.com" required :disabled="sent">
+        <button class="btn btn-gold" style="width:100%" type="submit" :disabled="busy || sent" x-text="busy?'Please wait…':sent?'Email link sent':'Send secure sign-in link'"></button>
       </form>
-      <button x-show="step==='code'" class="btn btn-ghost" style="width:100%;margin-top:10px" @click="step='email';code='';error=''">Use another email</button>
-      <p class="muted" style="font-size:11px;line-height:1.6;text-align:center;margin:20px 0 0">Protected by Supabase email verification. Never share your one-time code.</p>
+      <p x-show="sent" class="muted" style="font-size:13px;line-height:1.6;margin:14px 0">A secure sign-in link has been sent. Check your inbox and spam folder, then open the link on this device. It will return you to Aurapay.</p>
+      <button x-show="sent" class="btn btn-ghost" style="width:100%;margin-top:10px" @click="sent=false;message='';error=''">Use another email</button>
+      <p class="muted" style="font-size:11px;line-height:1.6;text-align:center;margin:20px 0 0">Protected by Supabase email authentication. Never forward your sign-in link.</p>
       <p x-show="message" x-text="message" style="color:var(--green);font-size:13px;margin-top:14px"></p>
       <p x-show="error" x-text="error" style="color:#ff9696;font-size:13px;margin-top:14px"></p>
     </section>
@@ -42,39 +37,27 @@
     }
     function authScreen() {
       return {
-        email:'', code:'', step:'email', busy:false, error:'', message:'',
+        email:'', busy:false, sent:false, error:'', message:'',
         async init() {
           if (!window.aurapaySupabase) { this.error='Supabase is not configured yet. Add the public Supabase URL and publishable key to Render.'; return; }
           try {
-            const { data } = await window.aurapaySupabase.auth.getSession();
+            const { data, error } = await window.aurapaySupabase.auth.getSession();
+            if (error) throw error;
             if (data?.session) location.replace('/');
-          } catch (e) { this.error='Could not check your sign-in session. Refresh and try again.'; }
+          } catch (e) { this.error=e.message || 'Could not check your sign-in session. Refresh and try again.'; }
         },
         async send() {
           this.busy=true; this.error=''; this.message='';
           try {
             const { error } = await window.aurapaySupabase.auth.signInWithOtp({
               email:this.email.trim().toLowerCase(),
-              options:{ shouldCreateUser:true }
+              options:{ shouldCreateUser:true, emailRedirectTo: window.location.origin + '/' }
             });
             if (error) throw error;
-            this.step='code';
-            this.message='A verification code has been sent. Check your inbox and spam folder.';
+            this.sent=true;
+            this.message='Open the secure sign-in link in the email on this device. You will be returned to Aurapay automatically.';
           } catch (e) {
-            this.error=e.message || 'Could not send a code. Please try again.';
-          } finally { this.busy=false; }
-        },
-        async verify() {
-          this.busy=true; this.error=''; this.message='';
-          try {
-            const { data, error } = await window.aurapaySupabase.auth.verifyOtp({
-              email:this.email.trim().toLowerCase(), token:this.code.trim(), type:'email'
-            });
-            if (error) throw error;
-            if (!data?.session) throw new Error('The code was accepted but no session was returned. Try again.');
-            location.replace('/');
-          } catch (e) {
-            this.error=e.message || 'That code could not be verified. Check it and try again.';
+            this.error=e.message || 'Could not send a sign-in link. Please try again.';
           } finally { this.busy=false; }
         }
       };
