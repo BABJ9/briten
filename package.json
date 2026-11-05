@@ -1,0 +1,14 @@
+{
+  "name": "aurapay-bm",
+  "version": "22.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Aurapay-bm fintech app hosted on Render with Supabase Auth and Postgres.",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js"
+  }
+}
