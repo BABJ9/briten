@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sign in — Aurapay-bm</title>
+  <link rel="stylesheet" href="/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js" defer></script>
+</head>
+<body>
+  <main style="min-height:100vh;display:grid;place-items:center;padding:22px">
+    <section class="panel" style="width:min(430px,100%);padding:30px" x-data="authScreen()" x-init="init()">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:34px">
+        <div class="brandmark">A</div>
+        <div><div style="font-weight:800;letter-spacing:-.03em;font-size:19px">aurapay<span class="gold">-bm</span></div><div class="small-label">Money, with intention.</div></div>
+      </div>
+      <div class="eyebrow">Secure access</div>
+      <h1 style="font-size:30px;letter-spacing:-.05em;margin:10px 0">Welcome back.</h1>
+      <p class="muted" style="font-size:14px;line-height:1.6;margin-bottom:25px">Sign in or create your account with a one-time verification code sent to your email.</p>
+      <form @submit.prevent="step==='email'?send():verify()">
+        <label class="small-label" for="email">Email address</label>
+        <input class="field" style="margin:8px 0 14px" id="email" type="email" x-model="email" autocomplete="email" placeholder="you@example.com" required :disabled="step==='code'">
+        <template x-if="step==='code'">
+          <div>
+            <label class="small-label" for="code">Verification code</label>
+            <input class="field" style="margin:8px 0 14px;letter-spacing:.25em" id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" x-model="code" placeholder="Enter code" required>
+          </div>
+        </template>
+        <button class="btn btn-gold" style="width:100%" type="submit" :disabled="busy" x-text="busy?'Please wait…':step==='email'?'Send verification code':'Verify and sign in'"></button>
+      </form>
+      <button x-show="step==='code'" class="btn btn-ghost" style="width:100%;margin-top:10px" @click="step='email';code='';error=''">Use another email</button>
+      <p class="muted" style="font-size:11px;line-height:1.6;text-align:center;margin:20px 0 0">Protected by Supabase email verification. Never share your one-time code.</p>
+      <p x-show="message" x-text="message" style="color:var(--green);font-size:13px;margin-top:14px"></p>
+      <p x-show="error" x-text="error" style="color:#ff9696;font-size:13px;margin-top:14px"></p>
+    </section>
+  </main>
+  <script src="/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
+  <script>
+    if (window.AURAPAY_CONFIG?.supabaseUrl && window.AURAPAY_CONFIG?.supabasePublishableKey && window.supabase?.createClient) {
+      window.aurapaySupabase = window.supabase.createClient(window.AURAPAY_CONFIG.supabaseUrl, window.AURAPAY_CONFIG.supabasePublishableKey);
+    }
+    function authScreen() {
+      return {
+        email:'', code:'', step:'email', busy:false, error:'', message:'',
+        async init() {
+          if (!window.aurapaySupabase) { this.error='Supabase is not configured yet. Add the public Supabase URL and publishable key to Render.'; return; }
+          try {
+            const { data } = await window.aurapaySupabase.auth.getSession();
+            if (data?.session) location.replace('/');
+          } catch (e) { this.error='Could not check your sign-in session. Refresh and try again.'; }
+        },
+        async send() {
+          this.busy=true; this.error=''; this.message='';
+          try {
+            const { error } = await window.aurapaySupabase.auth.signInWithOtp({
+              email:this.email.trim().toLowerCase(),
+              options:{ shouldCreateUser:true }
+            });
+            if (error) throw error;
+            this.step='code';
+            this.message='A verification code has been sent. Check your inbox and spam folder.';
+          } catch (e) {
+            this.error=e.message || 'Could not send a code. Please try again.';
+          } finally { this.busy=false; }
+        },
+        async verify() {
+          this.busy=true; this.error=''; this.message='';
+          try {
+            const { data, error } = await window.aurapaySupabase.auth.verifyOtp({
+              email:this.email.trim().toLowerCase(), token:this.code.trim(), type:'email'
+            });
+            if (error) throw error;
+            if (!data?.session) throw new Error('The code was accepted but no session was returned. Try again.');
+            location.replace('/');
+          } catch (e) {
+            this.error=e.message || 'That code could not be verified. Check it and try again.';
+          } finally { this.busy=false; }
+        }
+      };
+    }
+  </script>
+</body>
+</html>
