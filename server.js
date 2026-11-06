@@ -295,6 +295,62 @@ function technicalSnapshot(rows) {
   };
 }
 
+async function generateGeminiText({ system, prompt, maxOutputTokens = 1200, temperature = 0.2, timeoutMs = 30000 }) {
+  if (!GEMINI_API_KEY) throw new HttpError(503, "Gemini is not configured on the server.");
+
+  // Honour the configured model first, then fail over across current stable Flash models.
+  // This also recovers automatically if Render still has an older GEMINI_MODEL value.
+  const models = [...new Set([
+    GEMINI_MODEL || "gemini-3.8-flash",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash"
+  ])];
+  let lastFailure = null;
+
+  for (const model of models) {
+    let response;
+    let data;
+    try {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": GEMINI_API_KEY
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens, temperature }
+        }),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      data = await response.json().catch(() => ({}));
+    } catch (error) {
+      lastFailure = { model, message: error?.name === "TimeoutError" ? "request timed out" : "network request failed" };
+      console.error("Gemini model request failed:", model, lastFailure.message);
+      continue;
+    }
+
+    const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
+    if (response.ok && text) return { text, model };
+
+    const message = String(data.error?.message || data.promptFeedback?.blockReason || `HTTP ${response.status}`).slice(0, 240);
+    lastFailure = { model, status: response.status, message };
+    console.error("Gemini model unavailable:", model, response.status, message);
+
+    // Try another model for retired/unknown models, rate limits, and temporary provider overload.
+    const retryable = [400, 404, 429, 500, 502, 503, 504].includes(response.status);
+    if (!retryable) break;
+  }
+
+  const detail = lastFailure?.status === 403
+    ? "Google rejected API access. Check that the Generative Language API is enabled and the key has permission."
+    : "Gemini models are temporarily unavailable or not enabled for this API key. The service tried the configured model and current Flash fallbacks.";
+  throw new HttpError(502, detail);
+}
+
 async function handleApi(req, res, url) {
   const route = url.pathname;
   const method = req.method || "GET";
@@ -803,18 +859,9 @@ async function handleApi(req, res, url) {
     const prompt = `Analyze this market snapshot for a disciplined trader. Compare the selected timeframe with 15m, 1h, 4h and daily context where available; assess trend alignment, momentum, volatility, volume, liquidity/spread, order-book imbalance and derivatives funding/open interest where supplied. Treat order-book snapshots as noisy, not predictive. Use the supplied heuristic evidence score as a checklist, never as a win probability. Explicitly state NO TRADE when evidence conflicts, liquidity is poor, or invalidation cannot be defined. Separate observed facts from interpretation. Market data JSON:
 ${JSON.stringify(market)}
 User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a concise but useful multi-timeframe aware decision framework; do not imply certainty.`;
-    const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 1400, temperature: 0.2 } }),
-      signal: AbortSignal.timeout(30000)
-    });
-    const aiData = await aiResponse.json().catch(() => ({}));
-    const analysis = aiData.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
-    if (!aiResponse.ok || !analysis) {
-      console.error("Gemini trading analysis failed:", aiData.error?.message || aiResponse.status);
-      throw new HttpError(502, "Gemini could not complete the trading analysis. Try again shortly.");
-    }
-    return json(res, 200, { symbol, category, interval, market, decision_context: market.decision_context, analysis, source: "Live market feed · AI-assisted analysis", generated_at: new Date().toISOString(), disclaimer: "Probabilistic analysis only. No prediction is guaranteed; verify the market and manage risk before trading." });
+    const gemini = await generateGeminiText({ system, prompt, maxOutputTokens: 1400, temperature: 0.2, timeoutMs: 35000 });
+    const analysis = gemini.text;
+    return json(res, 200, { symbol, category, interval, market, decision_context: market.decision_context, analysis, ai_model: gemini.model, source: "Live market feed · AI-assisted analysis", generated_at: new Date().toISOString(), disclaimer: "Probabilistic analysis only. No prediction is guaranteed; verify the market and manage risk before trading." });
   }
 
   if (route === "/api/ai/assistant" && method === "POST") {
@@ -826,23 +873,9 @@ User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a con
     const system = mode === "insight"
       ? "You are Aurapay-bm’s careful financial wellness assistant. Explain general budgeting and spending-analysis concepts in plain language. You have no access to this user’s transaction history unless explicitly included, so never claim to have analysed real spending. Do not give investment guarantees, fabricate balances, claim fraud certainty, or request passwords, OTPs, seed phrases, BVN or card secrets. Keep advice practical and label uncertainty."
       : "You are Aurapay-bm support: calm, concise, warm and precise. Help explain the app, account safety, Flutterwave payment links, crypto wallet status and bills. Never ask for passwords, OTPs, private keys, seed phrases or full card details. Never claim a transaction succeeded unless the app has a verified provider result. For account-specific or unresolved issues, direct the user to official support.";
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: "user", parts: [{ text: message }] }],
-        generationConfig: { maxOutputTokens: 700, temperature: 0.4 }
-      }),
-      signal: AbortSignal.timeout(25000)
-    });
-    const result = await response.json().catch(() => ({}));
-    const answer = result.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("").trim();
-    if (!response.ok || !answer) {
-      console.error("Gemini request failed:", result.error?.message || response.status);
-      throw new HttpError(502, "AI analysis is temporarily unavailable. Verify the Gemini key, Generative Language API access, and billing/quota settings in Render.");
-    }
-    return json(res, 200, { answer });
+    const gemini = await generateGeminiText({ system, prompt: message, maxOutputTokens: 700, temperature: 0.4, timeoutMs: 30000 });
+    const answer = gemini.text;
+    return json(res, 200, { answer, ai_model: gemini.model });
   }
 
   throw new HttpError(404, "API endpoint not found.");
