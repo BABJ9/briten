@@ -11,8 +11,19 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const APP_URL = String(process.env.APP_URL || "").replace(/\/+$/, "");
-const FLW_SECRET = process.env.FLUTTERWAVE_SECRET_KEY || "";
-const FLW_WEBHOOK_HASH = process.env.FLUTTERWAVE_WEBHOOK_HASH || "";
+const FLW_SECRET = String(
+  process.env.FLUTTERWAVE_SECRET_KEY ||
+  process.env.FLW_SECRET_KEY ||
+  process.env.FLUTTERWAVE_SECRET ||
+  process.env.FLW_SECRET ||
+  ""
+).trim();
+const FLW_SECRET_SOURCE = process.env.FLUTTERWAVE_SECRET_KEY ? "FLUTTERWAVE_SECRET_KEY"
+  : process.env.FLW_SECRET_KEY ? "FLW_SECRET_KEY"
+  : process.env.FLUTTERWAVE_SECRET ? "FLUTTERWAVE_SECRET"
+  : process.env.FLW_SECRET ? "FLW_SECRET"
+  : null;
+const FLW_WEBHOOK_HASH = String(process.env.FLUTTERWAVE_WEBHOOK_HASH || process.env.FLW_WEBHOOK_HASH || "").trim();
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API || process.env.GOOGLE_GENERATIVE_AI_API_KEY || "").trim();
 const GEMINI_MODEL = String(process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 const CARD_ISSUING_ENABLED = /^(1|true|yes)$/i.test(process.env.FLUTTERWAVE_VIRTUAL_CARDS_ENABLED || "");
@@ -363,7 +374,7 @@ async function handleApi(req, res, url) {
       hosting: "Render",
       configured: {
         supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
-        flutterwave: !!FLW_SECRET,
+        flutterwave: !!FLW_SECRET, flutterwave_key_source: FLW_SECRET_SOURCE,
         gemini: !!GEMINI_API_KEY, gemini_key_source: process.env.GEMINI_API_KEY ? "GEMINI_API_KEY" : process.env.GOOGLE_GEMINI_API_KEY ? "GOOGLE_GEMINI_API_KEY" : process.env.GOOGLE_API_KEY ? "GOOGLE_API_KEY" : process.env.GEMINI_API ? "GEMINI_API" : process.env.GOOGLE_GENERATIVE_AI_API_KEY ? "GOOGLE_GENERATIVE_AI_API_KEY" : null
       },
       liveMoneyMovement: "provider-credentials-and-merchant-approval-required"
