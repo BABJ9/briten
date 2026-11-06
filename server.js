@@ -13,7 +13,7 @@ const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPAB
 const APP_URL = String(process.env.APP_URL || "").replace(/\/+$/, "");
 const FLW_SECRET = process.env.FLUTTERWAVE_SECRET_KEY || "";
 const FLW_WEBHOOK_HASH = process.env.FLUTTERWAVE_WEBHOOK_HASH || "";
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API || process.env.GOOGLE_GENERATIVE_AI_API_KEY || "").trim();
 const CARD_ISSUING_ENABLED = /^(1|true|yes)$/i.test(process.env.FLUTTERWAVE_VIRTUAL_CARDS_ENABLED || "");
 const MAX_BODY = 1024 * 1024;
 
@@ -307,7 +307,7 @@ async function handleApi(req, res, url) {
       configured: {
         supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
         flutterwave: !!FLW_SECRET,
-        gemini: !!GEMINI_API_KEY
+        gemini: !!GEMINI_API_KEY, gemini_key_source: process.env.GEMINI_API_KEY ? "GEMINI_API_KEY" : process.env.GOOGLE_GEMINI_API_KEY ? "GOOGLE_GEMINI_API_KEY" : process.env.GOOGLE_API_KEY ? "GOOGLE_API_KEY" : process.env.GEMINI_API ? "GEMINI_API" : process.env.GOOGLE_GENERATIVE_AI_API_KEY ? "GOOGLE_GENERATIVE_AI_API_KEY" : null
       },
       liveMoneyMovement: "provider-credentials-and-merchant-approval-required"
     });
@@ -722,7 +722,7 @@ async function handleApi(req, res, url) {
     if (!/^[A-Z0-9]{3,24}$/.test(symbol) || !allowedIntervals.has(interval)) {
       throw new HttpError(400, "Choose a valid Bybit market symbol and supported chart timeframe.");
     }
-    if (!GEMINI_API_KEY) throw new HttpError(503, "Gemini AI is not configured on Render yet.");
+    if (!GEMINI_API_KEY) throw new HttpError(503, "AI analysis is not configured. Add your Gemini key in Render using the variable name GEMINI_API_KEY, then redeploy.");
     const intervals = [...new Set([interval, "15", "60", "240", "D"] )];
     const tickerUrl = `https://api.bybit.com/v5/market/tickers?${new URLSearchParams({ category, symbol })}`;
     const requests = await Promise.all([
@@ -839,7 +839,7 @@ User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a con
     const answer = result.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("").trim();
     if (!response.ok || !answer) {
       console.error("Gemini request failed:", result.error?.message || response.status);
-      throw new HttpError(502, "Gemini is unavailable. Check the Gemini API key and API access in Render.");
+      throw new HttpError(502, "AI analysis is temporarily unavailable. Verify the Gemini key, Generative Language API access, and billing/quota settings in Render.");
     }
     return json(res, 200, { answer });
   }
