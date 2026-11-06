@@ -752,7 +752,7 @@ async function handleApi(req, res, url) {
     const bestBid = Number(orderbook.b?.[0]?.[0] || ticker.bid1Price || 0);
     const bestAsk = Number(orderbook.a?.[0]?.[0] || ticker.ask1Price || 0);
     const market = {
-      exchange: "Bybit public market data", category, symbol, interval,
+      exchange: "Live market feed", category, symbol, interval,
       last_price: Number(ticker.lastPrice || technicals.last_price),
       bid: bestBid, ask: bestAsk,
       spread_percent: bestBid > 0 && bestAsk > 0 ? ((bestAsk - bestBid) / ((bestAsk + bestBid) / 2)) * 100 : null,
@@ -762,8 +762,44 @@ async function handleApi(req, res, url) {
       orderbook_top5: { bid_size: bids, ask_size: asks, imbalance: bids + asks > 0 ? (bids - asks) / (bids + asks) : null },
       technicals, multi_timeframe: multiTimeframe
     };
+    // Evidence score is a transparent heuristic, not a win probability or trade signal.
+    let evidenceScore = 0;
+    let bullishFrames = 0, bearishFrames = 0, usableFrames = 0;
+    for (const [tf, frame] of Object.entries(multiTimeframe)) {
+      if (frame.ema_20 == null || frame.ema_50 == null || frame.last_price == null) continue;
+      usableFrames++;
+      const direction = frame.last_price > frame.ema_20 && frame.ema_20 > frame.ema_50 ? 1
+        : frame.last_price < frame.ema_20 && frame.ema_20 < frame.ema_50 ? -1 : 0;
+      if (direction > 0) bullishFrames++;
+      if (direction < 0) bearishFrames++;
+      evidenceScore += direction * (tf === interval ? 2 : 1);
+    }
+    const rsiValue = Number(technicals.rsi_14);
+    if (Number.isFinite(rsiValue)) {
+      if (rsiValue >= 52 && rsiValue <= 68) evidenceScore++;
+      else if (rsiValue >= 32 && rsiValue <= 48) evidenceScore--;
+    }
+    const volumeRatio = Number(technicals.volume_ratio);
+    if (Number.isFinite(volumeRatio) && volumeRatio >= 1.2) {
+      if (technicals.last_price > technicals.previous_close) evidenceScore++;
+      else if (technicals.last_price < technicals.previous_close) evidenceScore--;
+    }
+    const riskFlags = [];
+    if (market.spread_percent != null && market.spread_percent > 0.15) riskFlags.push("Wide spread: execution costs may be elevated");
+    if (Number.isFinite(rsiValue) && rsiValue >= 75) riskFlags.push("Momentum is stretched to the upside");
+    if (Number.isFinite(rsiValue) && rsiValue <= 25) riskFlags.push("Momentum is stretched to the downside");
+    if (Number.isFinite(volumeRatio) && volumeRatio < 0.6) riskFlags.push("Thin relative volume: breakout confirmation is weak");
+    if (usableFrames < 3) riskFlags.push("Limited timeframe coverage: reduce conviction");
+    const bias = evidenceScore >= 3 ? "Bullish lean" : evidenceScore <= -3 ? "Bearish lean" : "No clear edge";
+    market.decision_context = {
+      evidence_score: evidenceScore, score_range: "-8 to +8 (heuristic, not probability)",
+      bias, bullish_frames: bullishFrames, bearish_frames: bearishFrames,
+      usable_frames: usableFrames, rsi_zone: Number.isFinite(rsiValue) ? (rsiValue >= 70 ? "overbought" : rsiValue <= 30 ? "oversold" : "neutral") : "unavailable",
+      volume_confirmation: Number.isFinite(volumeRatio) ? volumeRatio >= 1.2 ? "elevated" : volumeRatio < 0.6 ? "thin" : "normal" : "unavailable",
+      risk_flags: riskFlags
+    };
     const system = `You are Aurapay Trade Intelligence, a rigorous crypto market analyst. Analyze ONLY the supplied Bybit public market snapshot and calculated indicators. Never claim certainty or 100% accuracy. Do not invent indicators, news, on-chain data, or events. Explain when data is insufficient. Return clear sections: Market regime; Directional bias (bullish/bearish/neutral); Evidence; Key support/resistance; Trade plan (entry zone, invalidation/stop, targets T1/T2, risk/reward only if calculable); Alternative scenario; Risk controls; What would change the view. If a setup is weak, say NO TRADE. Distinguish spot from linear derivatives and warn about leverage/liquidation risk. This is analysis, not order execution or financial advice. Do not give fabricated probabilities; if using confidence, use a qualitative low/medium/high label and explain why.`;
-    const prompt = `Analyze this market snapshot for a disciplined trader. Compare the selected timeframe with 15m, 1h, 4h and daily context where available; assess trend alignment, momentum, volatility, volume, liquidity/spread, order-book imbalance and derivatives funding/open interest where supplied. Treat order-book snapshots as noisy, not predictive. Market data JSON:
+    const prompt = `Analyze this market snapshot for a disciplined trader. Compare the selected timeframe with 15m, 1h, 4h and daily context where available; assess trend alignment, momentum, volatility, volume, liquidity/spread, order-book imbalance and derivatives funding/open interest where supplied. Treat order-book snapshots as noisy, not predictive. Use the supplied heuristic evidence score as a checklist, never as a win probability. Explicitly state NO TRADE when evidence conflicts, liquidity is poor, or invalidation cannot be defined. Separate observed facts from interpretation. Market data JSON:
 ${JSON.stringify(market)}
 User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a concise but useful multi-timeframe aware decision framework; do not imply certainty.`;
     const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
@@ -777,7 +813,7 @@ User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a con
       console.error("Gemini trading analysis failed:", aiData.error?.message || aiResponse.status);
       throw new HttpError(502, "Gemini could not complete the trading analysis. Try again shortly.");
     }
-    return json(res, 200, { symbol, category, interval, market, analysis, source: "Bybit public market data + Gemini 2.5 Flash", generated_at: new Date().toISOString(), disclaimer: "Probabilistic analysis only. No prediction is guaranteed; verify the market and manage risk before trading." });
+    return json(res, 200, { symbol, category, interval, market, decision_context: market.decision_context, analysis, source: "Live market feed · AI-assisted analysis", generated_at: new Date().toISOString(), disclaimer: "Probabilistic analysis only. No prediction is guaranteed; verify the market and manage risk before trading." });
   }
 
   if (route === "/api/ai/assistant" && method === "POST") {
