@@ -10,7 +10,7 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API || process.env.GOOGLE_GENERATIVE_AI_API_KEY || "").trim();
-const GEMINI_MODEL = String(process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
+const GEMINI_MODEL = String(process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
 const MAX_BODY = 1024 * 1024;
 
 class HttpError extends Error {
@@ -192,7 +192,7 @@ async function handleApi(req, res, url) {
         supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
         gemini: !!GEMINI_API_KEY, gemini_key_source: process.env.GEMINI_API_KEY ? "GEMINI_API_KEY" : process.env.GOOGLE_GEMINI_API_KEY ? "GOOGLE_GEMINI_API_KEY" : process.env.GOOGLE_API_KEY ? "GOOGLE_API_KEY" : process.env.GEMINI_API ? "GEMINI_API" : process.env.GOOGLE_GENERATIVE_AI_API_KEY ? "GOOGLE_GENERATIVE_AI_API_KEY" : null
       },
-      liveMoneyMovement: "provider-credentials-and-merchant-approval-required"
+      moneyMovement: "disabled-pending-new-provider"
     });
   }
 
