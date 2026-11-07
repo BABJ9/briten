@@ -266,7 +266,7 @@ async function handleApi(req, res, url) {
     if (!/^[A-Z0-9]{3,24}$/.test(symbol) || !allowedIntervals.has(interval)) {
       throw new HttpError(400, "Choose a valid Bybit market symbol and supported chart timeframe.");
     }
-    if (!GEMINI_API_KEY) throw new HttpError(503, "AI analysis is not configured. Add your Gemini key in Render using the variable name GEMINI_API_KEY, then redeploy.");
+    
     const intervals = [...new Set([interval, "15", "60", "240", "D"] )];
     const tickerUrl = `https://api.bybit.com/v5/market/tickers?${new URLSearchParams({ category, symbol })}`;
     const requests = await Promise.all([
@@ -346,9 +346,12 @@ async function handleApi(req, res, url) {
     const prompt = `Analyze this market snapshot for a disciplined trader. Compare the selected timeframe with 15m, 1h, 4h and daily context where available; assess trend alignment, momentum, volatility, volume, liquidity/spread, order-book imbalance and derivatives funding/open interest where supplied. Treat order-book snapshots as noisy, not predictive. Use the supplied heuristic evidence score as a checklist, never as a win probability. Explicitly state NO TRADE when evidence conflicts, liquidity is poor, or invalidation cannot be defined. Separate observed facts from interpretation. Market data JSON:
 ${JSON.stringify(market)}
 User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a concise but useful multi-timeframe aware decision framework; do not imply certainty.`;
-    const gemini = await generateGeminiText({ system, prompt, maxOutputTokens: 1400, temperature: 0.2, timeoutMs: 35000 });
-    const analysis = gemini.text;
-    return json(res, 200, { symbol, category, interval, market, decision_context: market.decision_context, analysis, ai_model: gemini.model, source: "Live market feed · AI-assisted analysis", generated_at: new Date().toISOString(), disclaimer: "Probabilistic analysis only. No prediction is guaranteed; verify the market and manage risk before trading." });
+    let gemini = null;
+    let analysis = "AI commentary is temporarily unavailable. Review the live technical snapshot and retry the AI thesis shortly.";
+    try { gemini = await generateGeminiText({ system, prompt, maxOutputTokens: 1800, temperature: 0.2, timeoutMs: 35000 }); analysis = gemini.text; } catch (error) { console.error("Trading AI unavailable:", error.message); }
+    const candles = (klinePayloads[selectedIndex]?.result?.list || []).slice().reverse().slice(-100).map(row => ({ time:Number(row[0]),open:Number(row[1]),high:Number(row[2]),low:Number(row[3]),close:Number(row[4]),volume:Number(row[5]) }));
+    
+    return json(res, 200, { symbol, category, interval, market, decision_context: market.decision_context, analysis, candles, ai_model: gemini?.model || null, ai_available: !!gemini, source: "Live Bybit market feed · AI-assisted analysis", generated_at: new Date().toISOString(), disclaimer: "Probabilistic analysis only. No prediction is guaranteed; verify the market and manage risk before trading." });
   }
 
   if (route === "/api/ai/assistant" && method === "POST") {
