@@ -242,6 +242,61 @@ async function generateGeminiText({ system, prompt, maxOutputTokens = 1200, temp
   throw new HttpError(502, detail);
 }
 
+async function streamGeminiText({ system, prompt, maxOutputTokens = 700, onText, timeoutMs = 30000 }) {
+  if (!GEMINI_API_KEY) throw new HttpError(503, "Gemini AI is not configured on the server.");
+  const models = [...new Set(["gemini-3.8-flash", GEMINI_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"].filter(Boolean))];
+  let lastFailure = null;
+  for (const model of models) {
+    let response;
+    try {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY, "Accept": "text/event-stream" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens }
+        }),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+    } catch (error) {
+      lastFailure = error?.name === "TimeoutError" ? "Gemini timed out." : "Gemini network request failed.";
+      continue;
+    }
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 240);
+      lastFailure = `Gemini ${model} returned HTTP ${response.status}: ${detail}`;
+      if ([400, 404, 429, 500, 502, 503, 504].includes(response.status)) continue;
+      throw new HttpError(502, lastFailure);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let completeText = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+      for (const event of events) {
+        const line = event.split("\n").find((entry) => entry.startsWith("data:"));
+        if (!line) continue;
+        const raw = line.slice(5).trim();
+        if (!raw || raw === "[DONE]") continue;
+        try {
+          const chunk = JSON.parse(raw);
+          const piece = chunk.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
+          if (piece) { completeText += piece; onText(piece); }
+        } catch {}
+      }
+    }
+    if (completeText.trim()) return { text: completeText, model };
+    lastFailure = `Gemini ${model} returned an empty response.`;
+  }
+  throw new HttpError(502, lastFailure || "Gemini models are temporarily unavailable.");
+}
+
 async function handleApi(req, res, url) {
   const route = url.pathname;
   const method = req.method || "GET";
@@ -427,6 +482,29 @@ User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a con
     const system = mode === "insight"
       ? "You are Aurapay-bm’s careful financial wellness assistant. Explain general budgeting and spending-analysis concepts in plain language. You have no access to this user’s transaction history unless explicitly included, so never claim to have analysed real spending. Do not give investment guarantees, fabricate balances, claim fraud certainty, or request passwords, OTPs, seed phrases, BVN or card secrets. Keep advice practical and label uncertainty."
       : "You are Aurapay-bm support: calm, concise, warm and precise. Help explain the app, account safety, crypto wallet status and general product features. Never ask for passwords, OTPs, private keys, seed phrases or full card details. Never claim a transaction succeeded unless the app has a verified provider result. For account-specific or unresolved issues, direct the user to official support.";
+    if (body.stream === true) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no"
+      });
+      res.flushHeaders?.();
+      const send = (payload) => res.write(`data: ${JSON.stringify(payload)}\\n\\n`);
+      send({ started: true });
+      try {
+        const gemini = await streamGeminiText({
+          system, prompt: message, maxOutputTokens: 700, timeoutMs: 30000,
+          onText: (text) => { if (!res.destroyed) send({ text }); }
+        });
+        if (!res.destroyed) send({ done: true, model: gemini.model });
+      } catch (error) {
+        if (!res.destroyed) send({ error: error.message || "Gemini could not complete the response." });
+      } finally {
+        if (!res.destroyed) res.end();
+      }
+      return;
+    }
     const gemini = await generateGeminiText({ system, prompt: message, maxOutputTokens: 700, temperature: 0.4, timeoutMs: 30000 });
     const answer = gemini.text;
     return json(res, 200, { answer, ai_model: gemini.model });
