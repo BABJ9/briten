@@ -13,11 +13,11 @@ Aurapay-bm is a Node.js web app hosted on Render. Supabase provides email OTP au
 - Start command: `npm start`
 - Health check: `GET /api/health`
 - Supabase: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and server-only `SUPABASE_SECRET_KEY` (or legacy `SUPABASE_SERVICE_ROLE_KEY`)
-- Gemini: `GEMINI_API_KEY`; default model `gemini-2.5-flash`
+- Gemini: `GEMINI_API_KEY`; primary model `gemini-3.8-flash` with configured Flash fallbacks
 - Bybit public market data requires no private API key.
 
 ## Trading desk
-The trading desk uses Bybit public tickers, candles and order-book data with multi-timeframe technical indicators and Gemini-assisted interpretation. It is research-only and does not submit orders. No signal guarantees profit or accuracy.
+The trading desk is focused on 5-minute directional signals. It uses closed Bybit 5-minute candles, with 15m/1h/4h context, EMA/RSI/ATR, volume and order-book checks. Gemini provides supporting commentary; the deterministic signal engine emits BUY, SELL or WAIT with entry, stop-loss, take-profit and a confidence score (not a win probability). Signals are stored in Supabase and evaluated against the next completed 5-minute candle for backtesting. It is research-only and does not submit orders. No signal guarantees profit or accuracy.
 
 ## Local run
 ```bash
