@@ -9,7 +9,7 @@ const PORT = Number(process.env.PORT || 3000);
 const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const MAX_BODY = 1024 * 1024;
+const MAX_BODY = 12 * 1024 * 1024;
 
 class HttpError extends Error {
   constructor(status, message, details = null) {
@@ -302,13 +302,62 @@ async function handleApi(req, res, url) {
       hosting: "Render",
       configured: {
         supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
-        ai: "AI Horde anonymous free chat"
+        ai: process.env.POLLINATIONS_API_KEY ? "Pollinations vision API" : "not_configured"
       },
       moneyMovement: "disabled-pending-new-provider"
     });
   }
 
   const user = await requireUser(req);
+
+  if (route === "/api/ai/snapshot-analysis" && method === "POST") {
+    requiredEnv("POLLINATIONS_API_KEY");
+    const body = await readBody(req);
+    const image = String(body.image || "");
+    const match = image.match(/^data:(image\\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
+    if (!match) throw new HttpError(400, "Upload a valid PNG, JPG or WEBP trading screenshot.");
+    const imageBytes = Buffer.from(match[2], "base64");
+    if (!imageBytes.length || imageBytes.length > 8 * 1024 * 1024) {
+      throw new HttpError(413, "Snapshot must be smaller than 8 MB.");
+    }
+    const prompt = "You are Trade-Me, a careful visual trading-chart analyst. Inspect the uploaded chart image itself, not OCR alone. Read the exchange, asset/symbol, timeframe, current visible price, chart type, candle structure, trend, momentum, support/resistance, volume and any visible indicators. Distinguish clearly between what is visible, what is inferred and what is unreadable. Never invent a price, indicator value, news item, probability or market fact. Do not imply that a screenshot provides live data. Provide these sections: 1) SNAPSHOT READ, 2) MARKET STRUCTURE, 3) BULLISH CASE, 4) BEARISH CASE, 5) KEY LEVELS, 6) TRADE SETUP (entry area, invalidation/stop and targets only if the image supports them), 7) RISK CHECK, 8) FINAL VERDICT. Say NO TRADE when evidence is incomplete, conflicting or the risk cannot be defined. Never promise profit or certainty. Do not place orders. This is educational analysis, not financial advice.";
+    let response;
+    try {
+      response = await fetch("https://gen.pollinations.ai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.POLLINATIONS_API_KEY}`,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          model: "google/gemini-3.8-flash",
+          messages: [{
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              { type: "image_url", image_url: { url: image } }
+            ]
+          }],
+          temperature: 0.2,
+          max_tokens: 1400
+        }),
+        signal: AbortSignal.timeout(90000)
+      });
+    } catch (error) {
+      throw new HttpError(502, error.name === "TimeoutError" ? "Pollinations vision analysis timed out. Please retry." : "Pollinations could not be reached. Please retry.");
+    }
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = result.error?.message || result.message || "Pollinations rejected the snapshot analysis request.";
+      throw new HttpError(response.status === 401 || response.status === 402 ? 502 : 502, String(message).slice(0, 280));
+    }
+    const analysis = result.choices?.[0]?.message?.content;
+    if (typeof analysis !== "string" || !analysis.trim()) {
+      throw new HttpError(502, "Pollinations returned an empty analysis. Please try again.");
+    }
+    return json(res, 200, { analysis: analysis.trim(), model: result.model || "google/gemini-3.8-flash", provider: "Pollinations", source: "Uploaded image snapshot" });
+  }
 
   if (route === "/api/trading/signals" && method === "GET") {
     await settleExpiredTradeSignals(user.id);
@@ -563,4 +612,4 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Trade-Me listening on ${PORT}`);
 });
-// Render redeploy marker: AI Horde integration release.
+// Render release: Pollinations snapshot-only vision AI.
