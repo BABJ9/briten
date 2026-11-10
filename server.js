@@ -314,7 +314,7 @@ async function handleApi(req, res, url) {
     requiredEnv("POLLINATIONS_API_KEY");
     const body = await readBody(req);
     const image = String(body.image || "");
-    const match = image.match(/^data:(image\\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
+    const match = image.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
     if (!match) throw new HttpError(400, "Upload a valid PNG, JPG or WEBP trading screenshot.");
     const imageBytes = Buffer.from(match[2], "base64");
     if (!imageBytes.length || imageBytes.length > 8 * 1024 * 1024) {
