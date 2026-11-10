@@ -32,7 +32,7 @@
 <button class="btn btn-ghost" @click="clearSnapshot()" :disabled="snapshotBusy">Remove image</button>
 </div>
 </div>
-<div x-show="!snapshotPreview" class="empty-state" style="padding:22px 10px"><i data-lucide="upload-cloud"></i><strong>Drop a chart screenshot here</strong><p class="small-label">PNG, JPG or WEBP · up to 10 MB</p></div>
+<div x-show="!snapshotPreview" class="empty-state" style="padding:22px 10px"><i data-lucide="upload-cloud"></i><strong>Upload a chart screenshot to begin</strong><p class="small-label">PNG, JPG or WEBP · up to 10 MB</p></div>
 <div class="notice" style="margin-top:12px">Privacy: the image is previewed and read in your browser. Only text detected in the screenshot and your optional note are sent to the free AI service. This OCR-based review may miss chart patterns, candle shapes or small labels; it does not execute trades.</div>
 <div x-show="snapshotBusy" class="small-label" style="margin-top:12px" x-text="snapshotStatus"></div>
 <div x-show="snapshotAnalysis" class="answer-panel" style="margin-top:14px"><div class="eyebrow">SNAPSHOT REVIEW</div><div style="white-space:pre-wrap" x-text="snapshotAnalysis"></div></div>
