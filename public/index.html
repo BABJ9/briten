@@ -94,11 +94,11 @@
 </div>
 <div class="section-heading"><div><h3>01 / Build your market scan</h3><p class="small-label">Choose a market and the timeframe you want to analyse.</p></div></div>
 <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px">
-<button class="btn btn-ghost" @click="tradeSymbol='BTCUSDT'">₿ BTC</button><button class="btn btn-ghost" @click="tradeSymbol='ETHUSDT'">◆ ETH</button><button class="btn btn-ghost" @click="tradeSymbol='SOLUSDT'">◎ SOL</button><button class="btn btn-ghost" @click="tradeSymbol='XRPUSDT'">XRP</button>
+<button class="btn btn-ghost" @click="tradeSymbol='BTCUSDT';screenSymbol='BTCUSDT';loadBybitScreen()">₿ BTC</button><button class="btn btn-ghost" @click="tradeSymbol='ETHUSDT';screenSymbol='ETHUSDT';loadBybitScreen()">◆ ETH</button><button class="btn btn-ghost" @click="tradeSymbol='SOLUSDT';screenSymbol='SOLUSDT';loadBybitScreen()">◎ SOL</button><button class="btn btn-ghost" @click="tradeSymbol='XRPUSDT';screenSymbol='XRPUSDT';loadBybitScreen()">XRP</button>
 </div>
 <div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
-<div><label class="small-label">Market symbol</label><input class="field" x-model="tradeSymbol" maxlength="24" placeholder="BTCUSDT" autocapitalize="characters"></div>
-<div><label class="small-label">Market type</label><select class="field" x-model="tradeCategory"><option value="linear">USDT perpetual</option><option value="spot">Spot</option></select></div>
+<div><label class="small-label">Market symbol</label><input class="field" x-model="tradeSymbol" @change="screenSymbol=tradeSymbol.toUpperCase();loadBybitScreen()" maxlength="24" placeholder="BTCUSDT" autocapitalize="characters"></div>
+<div><label class="small-label">Market type</label><select class="field" x-model="tradeCategory" @change="screenCategory=tradeCategory;loadBybitScreen()"><option value="linear">USDT perpetual</option><option value="spot">Spot</option></select></div>
 <div><label class="small-label">Decision timeframe</label><select class="field" x-model="tradeInterval" disabled><option value="5">5 minutes · signal timeframe</option></select></div>
 <div><label class="small-label">Analysis temperament</label><select class="field" x-model="tradeStyle"><option value="balanced">Balanced · evidence first</option><option value="conservative">Conservative · protect capital</option><option value="aggressive">Aggressive · higher volatility</option></select></div>
 </div>
