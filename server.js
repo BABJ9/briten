@@ -302,13 +302,36 @@ async function handleApi(req, res, url) {
       hosting: "Render",
       configured: {
         supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
-        ai: "Puter.js browser AI (user sign-in required)"
+        ai: process.env.POLLINATIONS_API_KEY ? "Pollinations AI" : "not_configured"
       },
       moneyMovement: "disabled-pending-new-provider"
     });
   }
 
   const user = await requireUser(req);
+
+  if (route === "/api/ai/chat" && method === "POST") {
+    requiredEnv("POLLINATIONS_API_KEY");
+    const body = await readBody(req);
+    const message = String(body.message || "").trim();
+    if (!message || message.length > 12000) throw new HttpError(400, "Enter a message up to 12,000 characters.");
+    const history = Array.isArray(body.history) ? body.history.slice(-20).filter(m => m && ["user","assistant"].includes(m.role) && typeof m.content === "string").map(m => ({ role:m.role, content:m.content.slice(0,8000) })) : [];
+    const system = "You are Trade-Me, an intelligent, friendly general-purpose AI assistant. Help with difficult questions, careful multi-step reasoning, explanations, maths, writing, coding, debugging and trading education. Break complex problems into logical steps, verify calculations, explain assumptions and uncertainty, and converse naturally using the supplied history. Do not invent facts or claim access to the user's private account data. Never request passwords, OTPs, private keys, seed phrases or full card details. For trading, never promise profits or fabricate live market data; say when a screenshot or supplied information is insufficient.";
+    let response;
+    try {
+      response = await fetch("https://gen.pollinations.ai/v1/chat/completions", {
+        method:"POST",
+        headers:{ "Authorization":`Bearer ${process.env.POLLINATIONS_API_KEY}`, "Content-Type":"application/json", "Accept":"application/json" },
+        body:JSON.stringify({ model:"openai", messages:[{role:"system",content:system},...history,{role:"user",content:message}], temperature:0.35, max_tokens:1800 }),
+        signal:AbortSignal.timeout(90000)
+      });
+    } catch(error) { throw new HttpError(502, error.name==="TimeoutError"?"Pollinations chat timed out. Please retry.":"Pollinations could not be reached. Please retry."); }
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok) throw new HttpError(502,String(result.error?.message||result.message||"Pollinations chat request failed.").slice(0,280));
+    const reply=result.choices?.[0]?.message?.content;
+    if(typeof reply!=="string"||!reply.trim()) throw new HttpError(502,"Pollinations returned an empty reply. Please retry.");
+    return json(res,200,{reply:reply.trim(),model:result.model||"openai",provider:"Pollinations"});
+  }
 
   if (route === "/api/ai/snapshot-analysis" && method === "POST") {
     requiredEnv("POLLINATIONS_API_KEY");
