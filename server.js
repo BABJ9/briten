@@ -190,57 +190,66 @@ function technicalSnapshot(rows, timeframe = "5") {
 async function generateGeminiText({ system, prompt, maxOutputTokens = 1200, temperature = 0.2, timeoutMs = 30000 }) {
   if (!GEMINI_API_KEY) throw new HttpError(503, "Gemini is not configured on the server.");
 
-  // Always try Gemini 3.8 Flash first; retain stable Flash fallbacks for temporary outages.
-  // An older Render GEMINI_MODEL value must not override the requested primary model.
-  const models = ["gemini-3.8-flash"];
+  // Keep Gemini 3.8 Flash as primary. Use supported stable Flash fallbacks only
+  // when Google reports overload, throttling, or a model availability problem.
+  const models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"];
   let lastFailure = null;
 
   for (const model of models) {
-    let response;
-    let data;
-    try {
-      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": GEMINI_API_KEY
-        },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens, temperature }
-        }),
-        signal: AbortSignal.timeout(timeoutMs)
-      });
-      data = await response.json().catch(() => ({}));
-    } catch (error) {
-      lastFailure = { model, message: error?.name === "TimeoutError" ? "request timed out" : "network request failed" };
-      console.error("Gemini model request failed:", model, lastFailure.message);
-      continue;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let response;
+      let data;
+      try {
+        response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY
+          },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: system }] },
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            // Gemini 3.x no longer accepts legacy temperature/top-p sampling controls.
+            generationConfig: { maxOutputTokens }
+          }),
+          signal: AbortSignal.timeout(timeoutMs)
+        });
+        data = await response.json().catch(() => ({}));
+      } catch (error) {
+        lastFailure = { model, message: error?.name === "TimeoutError" ? "request timed out" : "network request failed" };
+        console.error("Gemini model request failed:", model, lastFailure.message);
+        if (attempt === 0) { await new Promise(resolve => setTimeout(resolve, 450)); continue; }
+        break;
+      }
+
+      const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
+      if (response.ok && text) return { text, model };
+
+      const message = String(data.error?.message || data.promptFeedback?.blockReason || `HTTP ${response.status}`).slice(0, 240);
+      lastFailure = { model, status: response.status, message };
+      console.error("Gemini model unavailable:", model, response.status, message);
+
+      if (![429, 500, 502, 503, 504].includes(response.status)) break;
+      if (attempt === 0) {
+        const retryAfter = Number(response.headers.get("retry-after"));
+        const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(2500, retryAfter * 1000) : 650;
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+      }
     }
-
-    const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
-    if (response.ok && text) return { text, model };
-
-    const message = String(data.error?.message || data.promptFeedback?.blockReason || `HTTP ${response.status}`).slice(0, 240);
-    lastFailure = { model, status: response.status, message };
-    console.error("Gemini model unavailable:", model, response.status, message);
-
-    // Try another model for retired/unknown models, rate limits, and temporary provider overload.
-    const retryable = [400, 404, 429, 500, 502, 503, 504].includes(response.status);
-    if (!retryable) break;
+    // Move to the next supported stable Flash model after the primary retry.
   }
 
   const detail = lastFailure?.status === 403
     ? "Google rejected API access. Check that the Generative Language API is enabled and the key has permission."
-    : "Gemini models are temporarily unavailable or not enabled for this API key. The service tried the configured model and current Flash fallbacks.";
+    : `Gemini is unavailable after retrying Gemini 3.8 Flash and stable fallbacks. Last response: ${lastFailure?.message || "network error"}`;
   throw new HttpError(502, detail);
 }
 
 async function streamGeminiText({ system, prompt, maxOutputTokens = 700, onText, timeoutMs = 30000 }) {
   if (!GEMINI_API_KEY) throw new HttpError(503, "Gemini AI is not configured on the server.");
-  // Gemini 3.8 Flash is the primary streaming model; fall back only if it is unavailable.
-  const models = ["gemini-3.8-flash"];
+  // Keep Gemini 3.8 Flash primary, with stable Flash fallbacks for provider outages.
+  const models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"];
   let lastFailure = null;
   for (const model of models) {
     let response;
