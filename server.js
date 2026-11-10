@@ -9,7 +9,10 @@ const PORT = Number(process.env.PORT || 3000);
 const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const MAX_BODY = 12 * 1024 * 1024;
+const MAX_BODY = 36 * 1024 * 1024;
+const BAZAAR_BASE_URL = "https://api.bazaarlink.ai/v1";
+const BAZAAR_CHAT_MODEL = process.env.BAZAAR_CHAT_MODEL || "google/gemini-3.5-flash";
+const BAZAAR_IMAGE_MODEL = process.env.BAZAAR_IMAGE_MODEL || "openai/gpt-image-1";
 
 class HttpError extends Error {
   constructor(status, message, details = null) {
@@ -302,7 +305,7 @@ async function handleApi(req, res, url) {
       hosting: "Render",
       configured: {
         supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
-        ai: process.env.POLLINATIONS_API_KEY ? "Pollinations AI" : "not_configured"
+        ai: process.env.BAZAARLINK_API_KEY ? "BazaarLink" : "not_configured"
       },
       moneyMovement: "disabled-pending-new-provider"
     });
@@ -311,77 +314,60 @@ async function handleApi(req, res, url) {
   const user = await requireUser(req);
 
   if (route === "/api/ai/chat" && method === "POST") {
-    requiredEnv("POLLINATIONS_API_KEY");
+    requiredEnv("BAZAARLINK_API_KEY");
     const body = await readBody(req);
     const message = String(body.message || "").trim();
-    if (!message || message.length > 12000) throw new HttpError(400, "Enter a message up to 12,000 characters.");
-    const history = Array.isArray(body.history) ? body.history.slice(-20).filter(m => m && ["user","assistant"].includes(m.role) && typeof m.content === "string").map(m => ({ role:m.role, content:m.content.slice(0,8000) })) : [];
-    const system = "You are Trade-Me, an intelligent, friendly general-purpose AI assistant. Help with difficult questions, careful multi-step reasoning, explanations, maths, writing, coding, debugging and trading education. Break complex problems into logical steps, verify calculations, explain assumptions and uncertainty, and converse naturally using the supplied history. Do not invent facts or claim access to the user's private account data. Never request passwords, OTPs, private keys, seed phrases or full card details. For trading, never promise profits or fabricate live market data; say when a screenshot or supplied information is insufficient.";
+    if (!message || message.length > 16000) throw new HttpError(400, "Enter a message up to 16,000 characters.");
+    const personality = String(body.personality || "balanced").slice(0, 1200);
+    const history = Array.isArray(body.history) ? body.history.slice(-24).filter(m => m && ["user", "assistant"].includes(m.role) && typeof m.content === "string").map(m => ({ role: m.role, content: m.content.slice(0, 10000) })) : [];
+    const imageParts = []; let totalImageBytes = 0;
+    for (const item of (Array.isArray(body.images) ? body.images.slice(0, 8) : [])) {
+      const data = String(item?.data || "");
+      const match = data.match(/^data:(image\\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+      if (!match) throw new HttpError(400, "Use PNG, JPG, WEBP or GIF images.");
+      const bytes = Buffer.from(match[2], "base64"); totalImageBytes += bytes.length;
+      if (!bytes.length || bytes.length > 12 * 1024 * 1024 || totalImageBytes > 24 * 1024 * 1024) throw new HttpError(413, "Images may be 12 MB each, with 24 MB total per message.");
+      imageParts.push({ type: "image_url", image_url: { url: data, detail: "auto" } });
+    }
+    const system = "You are Trade-Me, a capable general-purpose AI assistant for complex reasoning, conversation, writing, coding, debugging, learning and visual understanding. Analyze attached images directly. Be accurate, explain assumptions and uncertainty, and never invent live market data. Never promise trading profits or place orders. Never ask for passwords, OTPs, private keys, seed phrases or full card details. User-selected personality: " + personality + ". Keep accuracy and safety above style.";
     let response;
-    try {
-      response = await fetch("https://gen.pollinations.ai/v1/chat/completions", {
-        method:"POST",
-        headers:{ "Authorization":`Bearer ${process.env.POLLINATIONS_API_KEY}`, "Content-Type":"application/json", "Accept":"application/json" },
-        body:JSON.stringify({ model:"google/gemini-3.8-flash", messages:[{role:"system",content:system},...history,{role:"user",content:message}], temperature:0.35, max_tokens:1800 }),
-        signal:AbortSignal.timeout(90000)
-      });
-    } catch(error) { throw new HttpError(502, error.name==="TimeoutError"?"Pollinations chat timed out. Please retry.":"Pollinations could not be reached. Please retry."); }
-    const result=await response.json().catch(()=>({}));
-    if(!response.ok) throw new HttpError(502,String(result.error?.message||result.message||"Pollinations chat request failed.").slice(0,280));
-    const reply=result.choices?.[0]?.message?.content;
-    if(typeof reply!=="string"||!reply.trim()) throw new HttpError(502,"Pollinations returned an empty reply. Please retry.");
-    return json(res,200,{reply:reply.trim(),model:result.model||"google/gemini-3.8-flash",provider:"Pollinations"});
+    try { response = await fetch(BAZAAR_BASE_URL + "/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + process.env.BAZAARLINK_API_KEY, "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: BAZAAR_CHAT_MODEL, messages: [{ role: "system", content: system }, ...history, { role: "user", content: [{ type: "text", text: message }, ...imageParts] }], temperature: 0.35, max_tokens: 2400, reasoning_effort: "high" }), signal: AbortSignal.timeout(120000) }); }
+    catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Bazaar AI timed out. Please retry." : "Bazaar AI could not be reached. Please retry."); }
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Bazaar AI chat request failed.").slice(0, 280));
+    const reply = result.choices?.[0]?.message?.content;
+    const textReply = typeof reply === "string" ? reply : Array.isArray(reply) ? reply.filter(p => p.type === "text").map(p => p.text).join("\\n") : "";
+    if (!textReply.trim()) throw new HttpError(502, "Bazaar AI returned an empty reply. Please retry.");
+    return json(res, 200, { reply: textReply.trim(), model: result.model || BAZAAR_CHAT_MODEL, provider: "BazaarLink" });
   }
 
   if (route === "/api/ai/snapshot-analysis" && method === "POST") {
-    requiredEnv("POLLINATIONS_API_KEY");
-    const body = await readBody(req);
-    const image = String(body.image || "");
-    const match = image.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
-    if (!match) throw new HttpError(400, "Upload a valid PNG, JPG or WEBP trading screenshot.");
-    const imageBytes = Buffer.from(match[2], "base64");
-    if (!imageBytes.length || imageBytes.length > 8 * 1024 * 1024) {
-      throw new HttpError(413, "Snapshot must be smaller than 8 MB.");
-    }
-    const prompt = "You are Trade-Me, a careful visual trading-chart analyst. Inspect the uploaded chart image itself, not OCR alone. Read the exchange, asset/symbol, timeframe, current visible price, chart type, candle structure, trend, momentum, support/resistance, volume and any visible indicators. Distinguish clearly between what is visible, what is inferred and what is unreadable. Never invent a price, indicator value, news item, probability or market fact. Do not imply that a screenshot provides live data. Provide these sections: 1) SNAPSHOT READ, 2) MARKET STRUCTURE, 3) BULLISH CASE, 4) BEARISH CASE, 5) KEY LEVELS, 6) TRADE SETUP (entry area, invalidation/stop and targets only if the image supports them), 7) RISK CHECK, 8) FINAL VERDICT. Say NO TRADE when evidence is incomplete, conflicting or the risk cannot be defined. Never promise profit or certainty. Do not place orders. This is educational analysis, not financial advice.";
+    requiredEnv("BAZAARLINK_API_KEY"); const body = await readBody(req); const image = String(body.image || "");
+    const match = image.match(/^data:(image\\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+    if (!match) throw new HttpError(400, "Upload a valid PNG, JPG, WEBP or GIF image.");
+    const bytes = Buffer.from(match[2], "base64"); if (!bytes.length || bytes.length > 12 * 1024 * 1024) throw new HttpError(413, "Snapshot must be smaller than 12 MB.");
+    const prompt = "Analyze this actual trading chart image visually. Read only legible values. Separate observed facts, interpretations and unknowns. Cover chart read, market structure, bullish/bearish scenarios, visible levels, possible setup only if supported, invalidation and risk. Do not invent live prices, indicators, news or probabilities. A screenshot is not live market data. Say WAIT/NO TRADE if uncertain. Never promise profits or place orders. Educational analysis only. User notes: " + String(body.notes || "None").slice(0, 2000);
     let response;
-    try {
-      response = await fetch("https://gen.pollinations.ai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.POLLINATIONS_API_KEY}`,
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        body: JSON.stringify({
-          model: "google/gemini-3.8-flash",
-          messages: [{
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: image } }
-            ]
-          }],
-          temperature: 0.2,
-          max_tokens: 1400
-        }),
-        signal: AbortSignal.timeout(90000)
-      });
-    } catch (error) {
-      throw new HttpError(502, error.name === "TimeoutError" ? "Pollinations vision analysis timed out. Please retry." : "Pollinations could not be reached. Please retry.");
-    }
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const message = result.error?.message || result.message || "Pollinations rejected the snapshot analysis request.";
-      throw new HttpError(response.status === 401 || response.status === 402 ? 502 : 502, String(message).slice(0, 280));
-    }
-    const analysis = result.choices?.[0]?.message?.content;
-    if (typeof analysis !== "string" || !analysis.trim()) {
-      throw new HttpError(502, "Pollinations returned an empty analysis. Please try again.");
-    }
-    return json(res, 200, { analysis: analysis.trim(), model: result.model || "google/gemini-3.8-flash", provider: "Pollinations", source: "Uploaded image snapshot" });
+    try { response = await fetch(BAZAAR_BASE_URL + "/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + process.env.BAZAARLINK_API_KEY, "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: BAZAAR_CHAT_MODEL, messages: [{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: image, detail: "high" } }] }], temperature: 0.2, max_tokens: 1800, reasoning_effort: "high" }), signal: AbortSignal.timeout(120000) }); }
+    catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Bazaar vision analysis timed out. Please retry." : "Bazaar AI could not be reached."); }
+    const result = await response.json().catch(() => ({})); if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Bazaar snapshot analysis failed.").slice(0, 280));
+    const analysis = result.choices?.[0]?.message?.content; const textAnalysis = typeof analysis === "string" ? analysis : Array.isArray(analysis) ? analysis.filter(p => p.type === "text").map(p => p.text).join("\\n") : "";
+    if (!textAnalysis.trim()) throw new HttpError(502, "Bazaar returned an empty analysis.");
+    return json(res, 200, { analysis: textAnalysis.trim(), model: result.model || BAZAAR_CHAT_MODEL, provider: "BazaarLink", source: "Uploaded image snapshot" });
   }
 
+  if (route === "/api/ai/image-generation" && method === "POST") {
+    requiredEnv("BAZAARLINK_API_KEY"); const body = await readBody(req); const prompt = String(body.prompt || "").trim();
+    if (!prompt || prompt.length > 5000) throw new HttpError(400, "Enter an image prompt up to 5,000 characters.");
+    const allowed = new Set(["1024x1024", "1536x1024", "1024x1536", "2K"]); const size = allowed.has(String(body.size)) ? String(body.size) : "1024x1024";
+    let response;
+    try { response = await fetch(BAZAAR_BASE_URL + "/images/generations", { method: "POST", headers: { "Authorization": "Bearer " + process.env.BAZAARLINK_API_KEY, "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: BAZAAR_IMAGE_MODEL, prompt, size, n: 1 }), signal: AbortSignal.timeout(180000) }); }
+    catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Image generation timed out. Please retry." : "Bazaar image generation could not be reached."); }
+    const result = await response.json().catch(() => ({})); if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Bazaar image generation failed.").slice(0, 280));
+    const image = result.data?.[0]?.url || (result.data?.[0]?.b64_json ? "data:image/png;base64," + result.data[0].b64_json : "");
+    if (!image) throw new HttpError(502, "Bazaar returned no generated image.");
+    return json(res, 200, { image, model: BAZAAR_IMAGE_MODEL, provider: "BazaarLink" });
+  }
   if (route === "/api/trading/signals" && method === "GET") {
     await settleExpiredTradeSignals(user.id);
     const signals = await dbSelect("aurapay_trade_signals", {
@@ -527,4 +513,4 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Trade-Me listening on ${PORT}`);
 });
-// Render release: Pollinations snapshot-only vision AI.
+// Render release: BazaarLink multimodal conversational AI and image generation.
