@@ -18,6 +18,25 @@
 <div class="panel" style="padding:12px"><div class="small-label">02 · CHALLENGE</div><strong>AI thesis</strong><div class="small-label">Trend · evidence · invalidation</div></div>
 <div class="panel" style="padding:12px"><div class="small-label">03 · PROTECT</div><strong>Risk sizing</strong><div class="small-label">Define loss before entry</div></div>
 </div>
+<div class="panel" style="padding:16px;margin:18px 0;border:1px solid rgba(214,173,98,.28)">
+<div class="section-heading"><div><div class="eyebrow">SNAPSHOT WORKSPACE</div><h3>Upload a trading screenshot</h3><p class="small-label">Choose a Bybit, TradingView or other chart screenshot from your phone gallery, or take a new photo.</p></div><span class="pill">Image review</span></div>
+<label class="btn btn-ghost full-btn" for="tradeSnapshotInput" style="display:flex;justify-content:center;align-items:center;gap:8px;margin:12px 0;cursor:pointer"><i data-lucide="image-plus"></i> Choose screenshot / take photo</label>
+<input id="tradeSnapshotInput" type="file" accept="image/png,image/jpeg,image/webp" capture="environment" @change="handleSnapshotUpload($event)" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" aria-label="Upload trading screenshot">
+<div x-show="snapshotPreview" style="margin-top:12px">
+<img :src="snapshotPreview" alt="Trading screenshot preview" style="display:block;width:100%;max-height:340px;object-fit:contain;background:#080b10;border-radius:12px;border:1px solid rgba(255,255,255,.1)">
+<div class="small-label" style="margin-top:8px" x-text="snapshotFileName"></div>
+<label class="small-label" style="display:block;margin-top:12px">What should the analyst focus on? (optional)</label>
+<textarea class="field" rows="2" maxlength="500" x-model="snapshotNotes" placeholder="e.g. BTCUSDT 5m — check the breakout and possible retest"></textarea>
+<div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px">
+<button class="btn btn-gold" @click="analyzeSnapshot()" :disabled="snapshotBusy"><span x-text="snapshotBusy?'Reading screenshot…':'Analyse snapshot'"></span></button>
+<button class="btn btn-ghost" @click="clearSnapshot()" :disabled="snapshotBusy">Remove image</button>
+</div>
+</div>
+<div x-show="!snapshotPreview" class="empty-state" style="padding:22px 10px"><i data-lucide="upload-cloud"></i><strong>Drop a chart screenshot here</strong><p class="small-label">PNG, JPG or WEBP · up to 10 MB</p></div>
+<div class="notice" style="margin-top:12px">Privacy: the image is previewed and read in your browser. Only text detected in the screenshot and your optional note are sent to the free AI service. This OCR-based review may miss chart patterns, candle shapes or small labels; it does not execute trades.</div>
+<div x-show="snapshotBusy" class="small-label" style="margin-top:12px" x-text="snapshotStatus"></div>
+<div x-show="snapshotAnalysis" class="answer-panel" style="margin-top:14px"><div class="eyebrow">SNAPSHOT REVIEW</div><div style="white-space:pre-wrap" x-text="snapshotAnalysis"></div></div>
+</div>
 <div class="section-heading"><div><h3>01 / Build your market scan</h3><p class="small-label">Choose a market and the timeframe you want to analyse.</p></div></div>
 <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px">
 <button class="btn btn-ghost" @click="tradeSymbol='BTCUSDT'">₿ BTC</button><button class="btn btn-ghost" @click="tradeSymbol='ETHUSDT'">◆ ETH</button><button class="btn btn-ghost" @click="tradeSymbol='SOLUSDT'">◎ SOL</button><button class="btn btn-ghost" @click="tradeSymbol='XRPUSDT'">XRP</button>
