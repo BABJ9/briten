@@ -296,7 +296,7 @@ async function handleApi(req, res, url) {
   if (route === "/api/health" && method === "GET") {
     return json(res, 200, {
       ok: true,
-      app: "Aurapay-bm",
+      app: "Trade-Me",
       status: "ready",
       backend: "Supabase",
       hosting: "Render",
@@ -561,6 +561,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Aurapay-bm listening on ${PORT}`);
+  console.log(`Trade-Me listening on ${PORT}`);
 });
 // Render redeploy marker: AI Horde integration release.
