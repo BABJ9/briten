@@ -9,8 +9,6 @@ const PORT = Number(process.env.PORT || 3000);
 const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const POLLINATIONS_API_KEY = String(process.env.POLLINATIONS_API_KEY || "").trim();
-const POLLINATIONS_MODEL = String(process.env.POLLINATIONS_MODEL || "openai/gpt-4o-mini").trim();
 const MAX_BODY = 1024 * 1024;
 
 class HttpError extends Error {
@@ -187,89 +185,6 @@ function technicalSnapshot(rows, timeframe = "5") {
   };
 }
 
-async function generateAIText({ system, prompt, maxOutputTokens = 1200, timeoutMs = 30000 }) {
-  if (!POLLINATIONS_API_KEY) throw new HttpError(503, "AI service is not configured on the server. Add POLLINATIONS_API_KEY in Render.");
-
-  const response = await fetch("https://gen.pollinations.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${POLLINATIONS_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: POLLINATIONS_MODEL,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: prompt }
-      ],
-      max_tokens: maxOutputTokens,
-      stream: false
-    }),
-    signal: AbortSignal.timeout(timeoutMs)
-  });
-  const data = await response.json().catch(() => ({}));
-  const text = data.choices?.[0]?.message?.content;
-  if (!response.ok || typeof text !== "string" || !text.trim()) {
-    const message = String(data.error?.message || data.message || `HTTP ${response.status}`).slice(0, 240);
-    console.error("Pollinations AI request failed:", response.status, message);
-    throw new HttpError(502, `AI service request failed: ${message}`);
-  }
-  return { text: text.trim(), model: data.model || POLLINATIONS_MODEL };
-}
-
-async function streamAIText({ system, prompt, maxOutputTokens = 700, onText, timeoutMs = 30000 }) {
-  if (!POLLINATIONS_API_KEY) throw new HttpError(503, "AI service is not configured on the server. Add POLLINATIONS_API_KEY in Render.");
-  const response = await fetch("https://gen.pollinations.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${POLLINATIONS_API_KEY}`,
-      "Accept": "text/event-stream"
-    },
-    body: JSON.stringify({
-      model: POLLINATIONS_MODEL,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: prompt }
-      ],
-      max_tokens: maxOutputTokens,
-      stream: true
-    }),
-    signal: AbortSignal.timeout(timeoutMs)
-  });
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 240);
-    console.error("Pollinations AI stream failed:", response.status, detail);
-    throw new HttpError(502, `AI service returned HTTP ${response.status}: ${detail}`);
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let completeText = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split("\n\n");
-    buffer = events.pop() || "";
-    for (const event of events) {
-      const line = event.split("\n").find((entry) => entry.startsWith("data:"));
-      if (!line) continue;
-      const raw = line.slice(5).trim();
-      if (!raw || raw === "[DONE]") continue;
-      try {
-        const chunk = JSON.parse(raw);
-        const content = chunk.choices?.[0]?.delta?.content;
-        const piece = typeof content === "string" ? content
-          : Array.isArray(content) ? content.map(part => part.text || "").join("") : "";
-        if (piece) { completeText += piece; onText(piece); }
-      } catch {}
-    }
-  }
-  if (!completeText.trim()) throw new HttpError(502, "AI service returned an empty streamed response.");
-  return { text: completeText, model: POLLINATIONS_MODEL };
-}
-
 function buildFiveMinuteSignal(market, now = new Date()) {
   const frames = market.multi_timeframe || {};
   const bias = (frame) => {
@@ -387,7 +302,7 @@ async function handleApi(req, res, url) {
       hosting: "Render",
       configured: {
         supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
-        ai: !!POLLINATIONS_API_KEY, ai_provider: "Pollinations", ai_model: POLLINATIONS_MODEL
+        ai: "Puter.js keyless browser AI"
       },
       moneyMovement: "disabled-pending-new-provider"
     });
@@ -555,9 +470,8 @@ async function handleApi(req, res, url) {
     const prompt = `Analyze this market snapshot for a disciplined trader. The trade decision is strictly for the 5-minute timeframe; use 15m, 1h and 4h only as context; assess trend alignment, momentum, volatility, volume, liquidity/spread, order-book imbalance and derivatives funding/open interest where supplied. Treat order-book snapshots as noisy, not predictive. Use the supplied heuristic evidence score as a checklist, never as a win probability. Explicitly state NO TRADE when evidence conflicts, liquidity is poor, or invalidation cannot be defined. Separate observed facts from interpretation. Market data JSON:
 ${JSON.stringify(market)}
 User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a concise but useful multi-timeframe aware decision framework; do not imply certainty.`;
-    let ai = null;
-    let analysis = "AI commentary is temporarily unavailable. Review the live technical snapshot and retry the AI thesis shortly.";
-    try { ai = await generateAIText({ system, prompt, maxOutputTokens: 1800, timeoutMs: 20000 }); analysis = ai.text; } catch (error) { console.error("Trading AI unavailable:", error.message); }
+    const ai = null;
+    const analysis = "Live market data loaded. Keyless browser AI will generate the thesis in the frontend.";
     const candles = (klinePayloads[selectedIndex]?.result?.list || []).slice().reverse().slice(-100).map(row => ({ time:Number(row[0]),open:Number(row[1]),high:Number(row[2]),low:Number(row[3]),close:Number(row[4]),volume:Number(row[5]) }));
     
     const savedSignal = await dbInsert("aurapay_trade_signals", {
@@ -567,44 +481,11 @@ User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a con
       rationale: signal.rationale, market_snapshot: market,
       generated_at: signal.generated_at, expires_at: signal.expires_at
     });
-    return json(res, 200, { symbol, category, interval: "5", market, decision_context: market.decision_context, signal: { ...signal, id: savedSignal?.id || null, outcome_status: "PENDING" }, analysis, candles, ai_model: ai?.model || null, ai_available: !!ai, source: "Live Bybit 5-minute market feed · Pollinations AI-assisted analysis", generated_at: new Date().toISOString(), disclaimer: "Probabilistic analysis only. No prediction is guaranteed; verify the market and manage risk before trading." });
+    return json(res, 200, { symbol, category, interval: "5", market, decision_context: market.decision_context, signal: { ...signal, id: savedSignal?.id || null, outcome_status: "PENDING" }, analysis, candles, ai_model: null, ai_available: false, source: "Live Bybit 5-minute market feed · keyless client-side AI", generated_at: new Date().toISOString(), disclaimer: "Probabilistic analysis only. No prediction is guaranteed; verify the market and manage risk before trading." });
   }
 
   if (route === "/api/ai/assistant" && method === "POST") {
-    const body = await readBody(req);
-    const message = String(body.message || "").trim().slice(0, 1200);
-    const mode = body.mode === "insight" ? "insight" : "support";
-    if (!message) throw new HttpError(400, "Write a question first.");
-    if (!POLLINATIONS_API_KEY) throw new HttpError(503, "AI service is not configured on Render yet. Add POLLINATIONS_API_KEY.");
-    const system = mode === "insight"
-      ? "You are Aurapay-bm’s careful financial wellness assistant. Explain general budgeting and spending-analysis concepts in plain language. You have no access to this user’s transaction history unless explicitly included, so never claim to have analysed real spending. Do not give investment guarantees, fabricate balances, claim fraud certainty, or request passwords, OTPs, seed phrases, BVN or card secrets. Keep advice practical and label uncertainty."
-      : "You are Aurapay-bm support: calm, concise, warm and precise. Help explain the app, account safety, crypto wallet status and general product features. Never ask for passwords, OTPs, private keys, seed phrases or full card details. Never claim a transaction succeeded unless the app has a verified provider result. For account-specific or unresolved issues, direct the user to official support.";
-    if (body.stream === true) {
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no"
-      });
-      res.flushHeaders?.();
-      const send = (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
-      send({ started: true });
-      try {
-        const ai = await streamAIText({
-          system, prompt: message, maxOutputTokens: 700, timeoutMs: 30000,
-          onText: (text) => { if (!res.destroyed) send({ text }); }
-        });
-        if (!res.destroyed) send({ done: true, model: ai.model });
-      } catch (error) {
-        if (!res.destroyed) send({ error: error.message || "AI service could not complete the response." });
-      } finally {
-        if (!res.destroyed) res.end();
-      }
-      return;
-    }
-    const ai = await generateAIText({ system, prompt: message, maxOutputTokens: 700, timeoutMs: 30000 });
-    const answer = ai.text;
-    return json(res, 200, { answer, ai_model: ai.model });
+    throw new HttpError(410, "AI now runs in the browser using Puter.js. Use the updated frontend.");
   }
 
   throw new HttpError(404, "API endpoint not found.");
