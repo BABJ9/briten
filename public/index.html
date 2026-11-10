@@ -9,196 +9,34 @@
 <section x-show="false" x-transition.opacity class="panel page-panel"><div class="section-heading"><div><h2>Crypto wallet</h2><p class="small-label">Stablecoin wallet and transfers</p></div><span class="pill">Supported networks</span></div><p class="muted">Receive to your configured merchant wallet address or send supported stablecoins to an external wallet. Confirm the chain and address carefully.</p><div x-show="cryptoAccount" class="account-detail"><div class="round-icon"><i data-lucide="wallet"></i></div><div class="grow"><strong>Receiving address</strong><div class="account-number" style="overflow-wrap:anywhere" x-text="cryptoAccount?.deposit_address"></div><div class="small-label" x-text="(cryptoAccount?.metadata?.asset||'')+' · '+(cryptoAccount?.metadata?.network||'')"></div></div><button class="btn btn-ghost" @click="copyText(cryptoAccount?.deposit_address||'')">Copy</button></div><div x-show="!cryptoAccount" class="empty-state"><strong>No receiving address configured</strong><p class="small-label">Connect the stablecoin wallet address from your merchant dashboard in Render Environment Variables.</p><button class="btn btn-gold" @click="createCryptoAddress()" :disabled="busy">Load receiving address</button></div><div class="notice">The receiving address is the merchant wallet address configured for this service. It is shared, not a unique customer address, so deposits cannot be auto-attributed to individual users without a separate reconciliation flow.</div><div class="answer-panel" style="margin-top:16px"><h3>Send or convert stablecoins</h3><label class="small-label">Pay from</label><select class="field" x-model="cryptoSource"><option value="NGN">NGN balance</option><option value="USDT">USDT balance</option><option value="USDC">USDC balance</option><option value="RLUSD">RLUSD balance</option></select><label class="small-label">Receive token</label><select class="field" x-model="cryptoAsset"><option>USDT</option><option>USDC</option><option>RLUSD</option></select><label class="small-label">Network</label><select class="field" x-model="cryptoNetwork"><option value="SOLANA">Solana</option><option value="ETHEREUM">Ethereum</option><option value="BASE">Base</option><option value="POLYGON">Polygon</option></select><label class="small-label">Destination wallet address</label><input class="field" x-model="cryptoAddress" maxlength="128" placeholder="Paste destination wallet address"><label class="small-label">Amount in destination token</label><input class="field" x-model.number="cryptoAmount" type="number" min="0.01" step="0.01"><button class="btn btn-gold full-btn" style="margin-top:12px" @click="sendCrypto()" :disabled="busy||!cryptoAddress||!cryptoAmount">Review and submit transfer</button><p class="small-label" x-show="cryptoSendStatus" x-text="cryptoSendStatus" style="margin-top:12px"></p><button class="btn btn-ghost" x-show="cryptoTransferId" @click="checkCryptoStatus()" :disabled="busy" style="margin-top:10px">Check transfer status</button></div><div class="notice">Supported pairs: Solana USDT/USDC; Ethereum USDT/USDC/RLUSD; Base USDC; Polygon USDT/USDC. Crypto transfers are irreversible. Actual transfers require payment provider v4 credentials, approved production access, IP allowlisting and sufficient provider balance.</div></section><section x-show="false"" x-transition.opacity class="panel page-panel"><div class="section-heading"><div><h2>Multicurrency payment links</h2><p class="small-label">Create checkout links in a supported payment currency.</p></div><button class="btn btn-gold" @click="openModal('nairaLink')">+ Create link</button></div><div class="table-scroll"><table><thead><tr><th>Reference</th><th>Currency</th><th>Checkout</th><th>Status</th></tr></thead><tbody><template x-for="p in paymentLinks" :key="p.id"><tr><td x-text="p.reference"></td><td x-text="p.currency_code||p.asset||'NGN'"></td><td><a class="gold" :href="p.checkout_url||'#'" target="_blank" rel="noreferrer" x-text="p.checkout_url?'Open checkout':'—'"></a></td><td><span class="badge" x-text="p.status"></span></td></tr></template></tbody></table></div><div x-show="paymentLinks.length===0" class="empty-state"><div class="round-icon"><i data-lucide="link-2"></i></div><strong>No payment links yet</strong><p class="small-label">Create a link and share the secure checkout with your customer.</p><button class="btn btn-gold" @click="openModal('nairaLink')">Create payment link</button></div></section>
 <section x-show="false"" x-transition.opacity class="panel page-panel"><div class="section-heading"><div><h2>Send money</h2><p class="small-label">Verify the recipient’s bank account name before any transfer.</p></div><span class="pill">KYC protected</span></div><form @submit.prevent="resolveRecipient()" class="send-form"><label class="small-label">Bank account number</label><input class="field" style="margin:7px 0 14px" inputmode="numeric" maxlength="10" x-model="sendAccountNumber" placeholder="10-digit account number" required><label class="small-label">Recipient bank</label><select class="field" style="margin:7px 0 14px" x-model="sendBankCode" required><option value="">Choose bank</option><template x-for="b in banks" :key="b.code"><option :value="b.code" x-text="b.name"></option></template></select><button class="btn btn-ghost full-btn" type="submit" :disabled="busy" x-text="busy?'Verifying…':'Verify account name'"></button></form><div x-show="recipientName" class="answer-panel"><div class="small-label">BANK-VERIFIED ACCOUNT NAME</div><strong x-text="recipientName"></strong><p class="small-label" x-text="sendAccountNumber"></p><label class="small-label">Amount (NGN)</label><input class="field" style="margin:7px 0 14px" type="number" min="100" max="1000000" step="1" x-model.number="sendAmount" required><label class="check-row"><input type="checkbox" x-model="sendConfirmed"> I have checked the recipient’s name, bank and amount.</label><button class="btn btn-gold full-btn" style="margin-top:14px" @click="sendMoney()" :disabled="busy||!sendConfirmed||!recipientName">Confirm send</button></div><div class="notice">Name lookup checks the bank account record; it is not government-ID KYC. Transfers require verified identity KYC and sufficient available wallet funds. Funding credits are added only after payment verification; reserved transfer funds are released only after a confirmed failure.</div><div x-show="sendStatus" class="answer-panel"><div x-text="sendStatus"></div><div x-show="sendReference" style="margin-top:10px"><div class="small-label" x-text="'Reference: '+sendReference"></div><button class="btn btn-ghost" style="margin-top:8px" @click="checkTransferStatus()" :disabled="busy">Check transfer status</button></div></div></section><!-- feature removed -->
 <section x-show="false"" x-transition.opacity class="panel page-panel"><h2>Virtual cards</h2><p class="small-label">NGN virtual card issuance</p><!-- Real issuer-issued card details appear only after a successful issuance response. --><div class="answer-panel" style="margin-top:16px"><h3>Apply for a naira virtual card</h3><p class="small-label">Enter your legal cardholder details and the amount to fund the card with. Card issuance is securely processed after approval; card details are not generated locally.</p><label class="small-label">Full legal name</label><input class="field" x-model="cardName" autocomplete="name" maxlength="100" placeholder="Name on your ID"><label class="small-label">Billing address</label><input class="field" x-model="cardAddress" maxlength="180" placeholder="House number and street"><label class="small-label">City</label><input class="field" x-model="cardCity" maxlength="80" placeholder="City"><label class="small-label">State code (2 letters)</label><input class="field" x-model="cardState" maxlength="2" placeholder="LA"><label class="small-label">Postal code</label><input class="field" x-model="cardPostal" inputmode="numeric" maxlength="10" placeholder="Postal code"><label class="small-label">Initial funding (NGN)</label><input class="field" x-model.number="cardFunding" type="number" min="1000" max="1000000" step="100"><button class="btn btn-gold full-btn" style="margin-top:14px" @click="createVirtualCard()" :disabled="busy||!cardName||!cardAddress||!cardCity||!cardPostal" x-text="busy?'Submitting…':'Create real naira virtual card'"></button><p class="notice" x-show="cardIssueError" x-text="cardIssueError"></p><div class="answer-panel" x-show="issuedCard" style="margin-top:14px"><strong>Card issued</strong><div class="card-dots" x-text="issuedCard?.number"></div><p x-text="'Name: '+issuedCard?.name"></p><p x-text="'Expiry: '+issuedCard?.expiry+' · CVV: '+issuedCard?.cvv"></p><p class="small-label">Copy these details now. They are shown once and are not stored in Aurapay.</p><button class="btn btn-ghost" @click="copyText(issuedCard?.number+' | '+issuedCard?.expiry+' | '+issuedCard?.cvv)">Copy card details</button></div></div><div class="notice">Live card creation requires issuer approval and enabled card-issuing access for this service. If the issuer has not approved the legacy card API, the request will be safely rejected; no demo card details are fabricated.</div></section>
-<section x-show="page==='trading'" x-transition.opacity class="panel page-panel">
-<div class="eyebrow">TRADE-ME · MULTI-EXCHANGE INTELLIGENCE</div>
-<div class="section-heading" style="align-items:flex-start"><div><h2>Trade with a thesis, not a guess.</h2><p class="muted">A guided decision workflow: scan live markets, challenge the setup with AI, then calculate your risk before you decide.</p></div><span class="pill">Research only · No orders</span></div>
-
-<div class="gridcards" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:18px 0">
-<div class="panel" style="padding:12px"><div class="small-label">01 · SCAN</div><strong>Live market</strong><div class="small-label">Ticker · candles · order book</div></div>
-<div class="panel" style="padding:12px"><div class="small-label">02 · CHALLENGE</div><strong>AI thesis</strong><div class="small-label">Trend · evidence · invalidation</div></div>
-<div class="panel" style="padding:12px"><div class="small-label">03 · PROTECT</div><strong>Risk sizing</strong><div class="small-label">Define loss before entry</div></div>
-</div>
-<div class="bybit-terminal">
- <div class="bybit-market-head">
-  <div class="bybit-pair"><div><span class="bybit-coin">₿</span></div><div><strong x-text="screenSymbol"></strong><div class="small-label">Bybit feed · <span x-text="screenCategory==='linear'?'USDT Perpetual':'Spot'"></span></div></div></div>
-  <div class="bybit-last"><strong x-text="screenTicker?.lastPrice?Number(screenTicker.lastPrice).toLocaleString(undefined,{maximumFractionDigits:8}):'—'"></strong><span :class="Number(screenTicker?.price24hPcnt)>=0?'bybit-up':'bybit-down'" x-text="screenTicker?.price24hPcnt?((Number(screenTicker.price24hPcnt)*100).toFixed(2)+'%'):'—'"></span></div>
-  <div class="bybit-stat"><span>24h High</span><b x-text="screenTicker?.highPrice24h?Number(screenTicker.highPrice24h).toLocaleString():'—'"></b></div>
-  <div class="bybit-stat"><span>24h Low</span><b x-text="screenTicker?.lowPrice24h?Number(screenTicker.lowPrice24h).toLocaleString():'—'"></b></div>
-  <div class="bybit-stat"><span>24h Turnover</span><b x-text="screenTicker?.turnover24h?Number(screenTicker.turnover24h).toLocaleString(undefined,{maximumFractionDigits:0}):'—'"></b></div>
- </div>
- <div class="bybit-toolbar">
-  <div class="bybit-timeframes"><template x-for="tf in [{v:'1',l:'1m'},{v:'5',l:'5m'},{v:'15',l:'15m'},{v:'60',l:'1H'},{v:'240',l:'4H'},{v:'D',l:'1D'}]" :key="tf.v"><button type="button" :class="screenInterval===tf.v?'active':''" @click="screenInterval=tf.v;loadBybitScreen()"><span x-text="tf.l"></span></button></template></div>
-  <div class="small-label" x-text="screenLoading?'Updating live market…':screenUpdated?'Updated '+new Date(screenUpdated).toLocaleTimeString():'Waiting for live exchange feed'"></div>
- </div>
- <div class="bybit-main-grid">
-  <div class="bybit-chart-panel">
-   <div class="bybit-chart-title"><strong x-text="screenSymbol+' · '+({ '1':'1m','5':'5m','15':'15m','60':'1H','240':'4H','D':'1D'}[screenInterval])"></strong><span class="small-label">Candlestick chart · live exchange feed</span></div>
-   <div class="bybit-chart-wrap">
-    <svg viewBox="0 0 1000 430" preserveAspectRatio="none" role="img" :aria-label="screenSymbol+' candlestick chart'">
-     <g class="bybit-grid-lines"><line x1="0" y1="70" x2="1000" y2="70"/><line x1="0" y1="150" x2="1000" y2="150"/><line x1="0" y1="230" x2="1000" y2="230"/><line x1="0" y1="310" x2="1000" y2="310"/><line x1="0" y1="390" x2="1000" y2="390"/></g>
-     <template x-for="c in screenChartCandles" :key="c.time">
-      <g>
-       <line :x1="c.x" :x2="c.x" :y1="c.highY" :y2="c.lowY" :class="c.up?'bybit-candle-up':'bybit-candle-down'" stroke-width="2"/>
-       <rect :x="c.x-4.2" :y="Math.min(c.openY,c.closeY)" width="8.4" :height="Math.max(2,Math.abs(c.closeY-c.openY))" :class="c.up?'bybit-candle-up':'bybit-candle-down'"/>
-      </g>
-     </template>
-     <line x1="0" x2="1000" :y1="screenCurrentY" :y2="screenCurrentY" class="bybit-current-line" stroke-dasharray="7 6"/>
-    </svg>
-    <div class="bybit-chart-price" x-show="screenTicker?.lastPrice" x-text="Number(screenTicker.lastPrice).toLocaleString(undefined,{maximumFractionDigits:8})"></div>
-    <div class="bybit-chart-empty" x-show="!screenCandles.length" x-text="screenLoading?'Loading candles…':(screenError||'Candlestick data unavailable')"></div>
+<section x-show="page==='trading'" x-transition.opacity class="panel page-panel snapshot-only-workspace">
+ <div class="eyebrow">TRADE-ME · SNAPSHOT TRADING AI</div>
+ <div class="section-heading" style="align-items:flex-start"><div><h2>Upload a chart. Get an AI trade review.</h2><p class="muted">Trade-Me is now focused on screenshot-based trading analysis. Upload one chart image to begin.</p></div><span class="pill">Snapshot only</span></div>
+ <div class="snapshot-upload-card">
+  <label class="snapshot-dropzone" for="tradeSnapshotInput">
+   <i data-lucide="image-plus"></i>
+   <strong x-text="snapshotPreview?'Replace chart snapshot':'Upload a trading snapshot'"></strong>
+   <span>Choose from gallery or take a photo · PNG, JPG, WEBP · max 10 MB</span>
+  </label>
+  <input id="tradeSnapshotInput" type="file" accept="image/png,image/jpeg,image/webp" capture="environment" @change="handleSnapshotUpload($event)" aria-label="Upload trading screenshot" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
+  <div x-show="snapshotPreview" class="snapshot-preview-wrap">
+   <img :src="snapshotPreview" alt="Your uploaded trading chart" class="snapshot-preview-image">
+   <div class="small-label" x-text="snapshotFileName"></div>
+   <div class="snapshot-actions">
+    <button class="btn btn-gold" @click="analyzeSnapshot()" :disabled="snapshotBusy"><span x-text="snapshotBusy?'Analysing snapshot…':'Analyse this snapshot'"></span></button>
+    <button class="btn btn-ghost" @click="clearSnapshot()" :disabled="snapshotBusy">Remove snapshot</button>
    </div>
-   <div class="bybit-volume-label">VOLUME</div>
-   <div class="bybit-volume-bars"><template x-for="c in screenChartCandles" :key="'v'+c.time"><span :class="c.up?'up':'down'" :style="'height:'+c.volumeHeight+'%'"></span></template></div>
   </div>
-  <div class="bybit-side-panel">
-   <div class="bybit-panel-heading"><strong>Order book</strong><span class="small-label">Price (USDT) · Size</span></div>
-   <div class="bybit-book-head"><span>Price (USDT)</span><span>Size</span><span>Total</span></div>
-   <div class="bybit-book-asks"><template x-for="(level,i) in screenAsks" :key="'a'+i"><div class="bybit-book-row ask"><i :style="'width:'+level.depth+'%'"></i><span x-text="Number(level.price).toLocaleString(undefined,{maximumFractionDigits:8})"></span><span x-text="Number(level.size).toFixed(4)"></span><span x-text="Number(level.total).toFixed(4)"></span></div></template></div>
-   <div class="bybit-book-mid" x-text="screenTicker?.lastPrice?Number(screenTicker.lastPrice).toLocaleString(undefined,{maximumFractionDigits:8}):'—'"></div>
-   <div class="bybit-book-bids"><template x-for="(level,i) in screenBids" :key="'b'+i"><div class="bybit-book-row bid"><i :style="'width:'+level.depth+'%'"></i><span x-text="Number(level.price).toLocaleString(undefined,{maximumFractionDigits:8})"></span><span x-text="Number(level.size).toFixed(4)"></span><span x-text="Number(level.total).toFixed(4)"></span></div></template></div>
-  </div>
- </div>
- <div class="bybit-bottom-grid">
-  <div class="bybit-trades-panel"><div class="bybit-panel-heading"><strong>Recent trades</strong><span class="small-label">Live public feed</span></div><div class="bybit-trade-head"><span>Price (USDT)</span><span>Quantity</span><span>Time</span></div><template x-for="(t,i) in screenTrades" :key="t.time+i"><div class="bybit-trade-row"><b :class="t.side==='Buy'?'bybit-up':'bybit-down'" x-text="Number(t.price).toLocaleString(undefined,{maximumFractionDigits:8})"></b><span x-text="Number(t.size).toFixed(4)"></span><span x-text="new Date(Number(t.time)).toLocaleTimeString()"></span></div></template><div class="small-label" x-show="!screenTrades.length">Recent trades will appear when the feed loads.</div></div>
-  <div class="bybit-ticket">
-   <div class="bybit-panel-heading"><strong>Order panel</strong><span class="bybit-demo-tag">Preview only</span></div>
-   <div class="bybit-side-switch"><button type="button" :class="screenOrderSide==='Buy'?'buy-active':''" @click="screenOrderSide='Buy'">Buy / Long</button><button type="button" :class="screenOrderSide==='Sell'?'sell-active':''" @click="screenOrderSide='Sell'">Sell / Short</button></div>
-   <div class="bybit-ticket-tabs"><button type="button" :class="screenOrderType==='Market'?'active':''" @click="screenOrderType='Market'">Market</button><button type="button" :class="screenOrderType==='Limit'?'active':''" @click="screenOrderType='Limit'">Limit</button></div>
-   <label class="small-label">Price (USDT)</label><input class="field" type="number" min="0" step="any" x-model="screenOrderPrice" :placeholder="screenOrderType==='Market'?'Market price':String(screenTicker?.lastPrice||'')">
-   <label class="small-label">Quantity</label><input class="field" type="number" min="0" step="any" x-model="screenOrderQty" placeholder="Enter quantity">
-   <div class="bybit-ticket-summary"><span>Est. value</span><b x-text="screenOrderQty&&screenTicker?.lastPrice?(Number(screenOrderQty)*(Number(screenOrderPrice)||Number(screenTicker.lastPrice))).toLocaleString(undefined,{maximumFractionDigits:4})+' USDT':'—'"></b></div>
-   <button type="button" class="bybit-preview-button" :class="screenOrderSide==='Buy'?'buy-active':'sell-active'" @click="screenOrderNotice='This is a visual preview only. Live order execution is not connected in Aurapay-bm.'">Preview order</button>
-   <div class="small-label" x-show="screenOrderNotice" x-text="screenOrderNotice"></div>
-   <div class="small-label bybit-risk-note">No exchange orders are submitted from this screen.</div>
+  <div x-show="!snapshotPreview" class="snapshot-empty-state"><i data-lucide="scan-search"></i><strong>Your analysis starts with an image</strong><span>No symbol forms, live market scanner, chat prompts or manual market inputs.</span></div>
+  <div x-show="snapshotBusy" class="snapshot-progress"><span class="snapshot-spinner"></span><span x-text="snapshotStatus"></span></div>
+  <div x-show="snapshotStatus&&!snapshotBusy" class="small-label snapshot-status" x-text="snapshotStatus"></div>
+  <div x-show="snapshotAnalysis" class="snapshot-result answer-panel">
+   <div class="eyebrow">TRADE-ME AI · SNAPSHOT REPORT</div>
+   <div class="snapshot-report-text" x-text="snapshotAnalysis"></div>
+   <button class="btn btn-ghost" style="margin-top:14px" @click="copyText(snapshotAnalysis)">Copy analysis</button>
   </div>
  </div>
-</div>
-<section class="trade-me-edge panel">
- <div class="section-heading"><div><div class="eyebrow">TRADE-ME EDGE · CROSS-EXCHANGE CHECK</div><h3>Is the market priced differently elsewhere?</h3><p class="small-label">Compare the same spot pair across Bybit and Binance. A price gap is not a guaranteed arbitrage opportunity; fees, slippage and transfer time matter.</p></div><span class="pill">Live comparison</span></div>
- <div class="edge-grid">
-  <div class="edge-quote"><span>BYBIT ·  <span x-text="screenCategory==='linear'?'PERPETUAL':'SPOT'"></span></span><strong x-text="screenTicker?.lastPrice?Number(screenTicker.lastPrice).toLocaleString(undefined,{maximumFractionDigits:8}):'—'"></strong><small x-text="screenSymbol"></small></div>
-  <div class="edge-quote"><span>BINANCE · SPOT</span><strong x-text="screenCompare?.price?Number(screenCompare.price).toLocaleString(undefined,{maximumFractionDigits:8}):'—'"></strong><small x-text="screenCompare?.status||'Checking public ticker…'"></small></div>
-  <div class="edge-quote"><span>PRICE DIFFERENCE</span><strong :class="Number(screenCompare?.spreadPct)>=0?'bybit-up':'bybit-down'" x-text="screenCompare?.spreadPct!=null?(Number(screenCompare.spreadPct).toFixed(3)+'%'):'—'"></strong><small>Binance vs Bybit</small></div>
- </div>
- <div class="edge-foot"><span x-text="screenCompare?.updated?'Compared '+new Date(screenCompare.updated).toLocaleTimeString():'Waiting for comparison'"></span><button class="btn btn-ghost" type="button" @click="loadExchangeComparison()">Refresh comparison</button></div>
-</section>
-<div class="panel" style="padding:16px;margin:18px 0;border:1px solid rgba(214,173,98,.28)">
-<div class="section-heading"><div><div class="eyebrow">SNAPSHOT WORKSPACE</div><h3>Upload a trading screenshot</h3><p class="small-label">Choose a Bybit, Binance, TradingView or other chart screenshot from your phone gallery, or take a new photo.</p></div><span class="pill">Image review</span></div>
-<label class="btn btn-ghost full-btn" for="tradeSnapshotInput" style="display:flex;justify-content:center;align-items:center;gap:8px;margin:12px 0;cursor:pointer"><i data-lucide="image-plus"></i> Choose screenshot / take photo</label>
-<input id="tradeSnapshotInput" type="file" accept="image/png,image/jpeg,image/webp" capture="environment" @change="handleSnapshotUpload($event)" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" aria-label="Upload trading screenshot">
-<div x-show="snapshotPreview" style="margin-top:12px">
-<img :src="snapshotPreview" alt="Trading screenshot preview" style="display:block;width:100%;max-height:340px;object-fit:contain;background:#080b10;border-radius:12px;border:1px solid rgba(255,255,255,.1)">
-<div class="small-label" style="margin-top:8px" x-text="snapshotFileName"></div>
-<label class="small-label" style="display:block;margin-top:12px">What should the analyst focus on? (optional)</label>
-<textarea class="field" rows="2" maxlength="500" x-model="snapshotNotes" placeholder="e.g. BTCUSDT 5m — check the breakout and possible retest"></textarea>
-<div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px">
-<button class="btn btn-gold" @click="analyzeSnapshot()" :disabled="snapshotBusy"><span x-text="snapshotBusy?'Reading screenshot…':'Analyse snapshot'"></span></button>
-<button class="btn btn-ghost" @click="clearSnapshot()" :disabled="snapshotBusy">Remove image</button>
-</div>
-</div>
-<div x-show="!snapshotPreview" class="empty-state" style="padding:22px 10px"><i data-lucide="upload-cloud"></i><strong>Upload a chart screenshot to begin</strong><p class="small-label">PNG, JPG or WEBP · up to 10 MB</p></div>
-<div class="notice" style="margin-top:12px">Privacy: the image is previewed and read in your browser. Only text detected in the screenshot and your optional note are sent to the free AI service. This OCR-based review may miss chart patterns, candle shapes or small labels; it does not execute trades.</div>
-<div x-show="snapshotBusy" class="small-label" style="margin-top:12px" x-text="snapshotStatus"></div>
-<div x-show="snapshotAnalysis" class="answer-panel" style="margin-top:14px"><div class="eyebrow">SNAPSHOT REVIEW</div><div style="white-space:pre-wrap" x-text="snapshotAnalysis"></div></div>
-</div>
-<div class="section-heading"><div><h3>01 / Build your market scan</h3><p class="small-label">Choose a market and the timeframe you want to analyse.</p></div></div>
-<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px">
-<button class="btn btn-ghost" @click="tradeSymbol='BTCUSDT';screenSymbol='BTCUSDT';loadBybitScreen()">₿ BTC</button><button class="btn btn-ghost" @click="tradeSymbol='ETHUSDT';screenSymbol='ETHUSDT';loadBybitScreen()">◆ ETH</button><button class="btn btn-ghost" @click="tradeSymbol='SOLUSDT';screenSymbol='SOLUSDT';loadBybitScreen()">◎ SOL</button><button class="btn btn-ghost" @click="tradeSymbol='XRPUSDT';screenSymbol='XRPUSDT';loadBybitScreen()">XRP</button>
-</div>
-<div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
-<div><label class="small-label">Market symbol</label><input class="field" x-model="tradeSymbol" @change="screenSymbol=tradeSymbol.toUpperCase();loadBybitScreen()" maxlength="24" placeholder="BTCUSDT" autocapitalize="characters"></div>
-<div><label class="small-label">Market type</label><select class="field" x-model="tradeCategory" @change="screenCategory=tradeCategory;loadBybitScreen()"><option value="linear">USDT perpetual</option><option value="spot">Spot</option></select></div>
-<div><label class="small-label">Decision timeframe</label><select class="field" x-model="tradeInterval" disabled><option value="5">5 minutes · signal timeframe</option></select></div>
-<div><label class="small-label">Analysis temperament</label><select class="field" x-model="tradeStyle"><option value="balanced">Balanced · evidence first</option><option value="conservative">Conservative · protect capital</option><option value="aggressive">Aggressive · higher volatility</option></select></div>
-</div>
-<button class="btn btn-gold full-btn" style="margin-top:14px" @click="runTradingAnalysis()" :disabled="tradeBusy||!tradeSymbol.trim()" x-text="tradeBusy?'Scanning markets and validating the setup…':'Run full market intelligence scan'"></button>
-<div class="notice" x-show="tradeError" x-text="tradeError" style="margin-top:12px"></div>
-<div x-show="tradeResult?.candles?.length" class="panel" style="padding:12px;margin-top:16px"><div class="eyebrow">LIVE PRICE STRUCTURE</div><div style="height:180px;background:#0b1018;border-radius:10px;padding:10px"><svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%;height:100%"><polyline :points="chartPoints" fill="none" stroke="#d6ad62" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg></div><div class="small-label">Latest 100 Bybit candles · close-price path</div></div><div x-show="tradeResult" x-transition class="answer-panel" style="margin-top:18px">
-<div class="section-heading"><div><div class="eyebrow">02 / LIVE MARKET BRIEF</div><h3 x-text="tradeResult?.symbol+' · '+tradeResult?.interval"></h3><div class="small-label" x-text="tradeResult?.generated_at?'Updated '+new Date(tradeResult.generated_at).toLocaleString():''"></div></div><span class="pill">Live market snapshot</span></div>
-<div class="panel" style="padding:15px;margin:14px 0">
-<div class="eyebrow">5-MINUTE DIRECTIONAL SIGNAL</div>
-<div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px">
-<div><div class="small-label">DIRECTION</div><strong class="metric" :style="tradeResult?.signal?.direction==='BUY'?'color:var(--green)':tradeResult?.signal?.direction==='SELL'?'color:var(--red)':''" x-text="tradeResult?.signal?.direction||'—'"></strong></div>
-<div><div class="small-label">CONFIDENCE SCORE · NOT WIN PROBABILITY</div><strong class="metric" x-text="(tradeResult?.signal?.confidence_score??'—')+' / 100'"></strong><div class="small-label" x-text="tradeResult?.signal?.confidence_label||''"></div></div>
-<div><div class="small-label">ENTRY PRICE</div><strong x-text="tradeResult?.signal?.entry_price==null?'—':Number(tradeResult.signal.entry_price).toLocaleString(undefined,{maximumFractionDigits:8})"></strong></div>
-<div><div class="small-label">STOP LOSS</div><strong x-text="tradeResult?.signal?.stop_loss==null?'—':Number(tradeResult.signal.stop_loss).toLocaleString(undefined,{maximumFractionDigits:8})"></strong></div>
-<div><div class="small-label">TAKE PROFIT</div><strong x-text="tradeResult?.signal?.take_profit==null?'—':Number(tradeResult.signal.take_profit).toLocaleString(undefined,{maximumFractionDigits:8})"></strong></div>
-<div><div class="small-label">SIGNAL EXPIRES</div><strong x-text="tradeResult?.signal?.expires_at?new Date(tradeResult.signal.expires_at).toLocaleTimeString(): '—'"></strong></div>
-</div>
-<div class="small-label" style="margin-top:10px" x-text="tradeResult?.signal?.rationale||''"></div>
-<template x-for="flag in (tradeResult?.signal?.risk_flags||[])" :key="flag"><div class="small-label" style="margin-top:5px">• <span x-text="flag"></span></div></template>
-</div>
-<div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0">
-<div class="panel" style="padding:13px"><div class="small-label">Last traded price</div><strong class="metric" x-text="Number(tradeResult?.market?.last_price||0).toLocaleString(undefined,{maximumFractionDigits:8})"></strong></div>
-<div class="panel" style="padding:13px"><div class="small-label">24h trading range</div><strong x-text="Number(tradeResult?.market?.low_24h||0).toLocaleString()+' — '+Number(tradeResult?.market?.high_24h||0).toLocaleString()"></strong></div>
-<div class="panel" style="padding:13px"><div class="small-label">Spread</div><strong x-text="tradeResult?.market?.spread_percent==null?'Unavailable':tradeResult.market.spread_percent.toFixed(4)+'%'"></strong></div>
-<div class="panel" style="padding:13px"><div class="small-label">Order-book imbalance</div><strong x-text="tradeResult?.market?.orderbook_top5?.imbalance==null?'Unavailable':tradeResult.market.orderbook_top5.imbalance.toFixed(3)"></strong></div>
-</div>
-<div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0">
-<div class="panel" style="padding:13px"><div class="small-label">EVIDENCE BALANCE</div><strong class="metric" x-text="(tradeResult?.decision_context?.evidence_score>0?'+':'')+(tradeResult?.decision_context?.evidence_score??'—')+' / 8'"></strong><div class="small-label" x-text="tradeResult?.decision_context?.bias||'Awaiting analysis'"></div></div>
-<div class="panel" style="padding:13px"><div class="small-label">TIMEFRAME AGREEMENT</div><strong x-text="(tradeResult?.decision_context?.bullish_frames??0)+' bullish · '+(tradeResult?.decision_context?.bearish_frames??0)+' bearish'"></strong><div class="small-label" x-text="(tradeResult?.decision_context?.usable_frames??0)+' usable timeframes'"></div></div>
-</div>
-<div class="panel" style="padding:13px;margin:10px 0"><div class="small-label">RISK FLAGS TO REVIEW</div><template x-if="!tradeResult?.decision_context?.risk_flags?.length"><div class="small-label">No automated risk flags from the current snapshot. This does not mean the setup is safe.</div></template><template x-for="flag in (tradeResult?.decision_context?.risk_flags||[])" :key="flag"><div class="small-label" style="margin-top:7px">• <span x-text="flag"></span></div></template><div class="small-label" style="margin-top:9px">Evidence score is a technical heuristic, not a probability of profit.</div></div>
-<div class="small-label" style="margin:14px 0 8px">MULTI-TIMEFRAME ALIGNMENT</div>
-<div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
-<template x-for="tf in ['15','60','240','D']" :key="tf"><div class="panel" style="padding:12px"><div class="small-label" x-text="tf==='D'?'1 DAY':tf==='240'?'4 HOURS':tf==='60'?'1 HOUR':'15 MINUTES'"></div><strong x-text="tradeSignal(tf)"></strong><div class="small-label" x-text="tradeResult?.market?.multi_timeframe?.[tf]?.change_percent==null?'No candle data':tradeResult.market.multi_timeframe[tf].change_percent.toFixed(2)+'% candle change · RSI '+(tradeResult.market.multi_timeframe[tf].rsi_14??'n/a')"></div></div></template>
-</div>
-<div class="rule" style="margin:18px 0"></div>
-<div class="eyebrow">INTELLIGENCE · SETUP REVIEW</div><h3>AI trade thesis</h3>
-<div style="white-space:pre-wrap;line-height:1.8;font-size:14px" x-text="tradeResult?.analysis"></div>
-<div class="small-label" style="margin-top:14px" x-text="'Funding: '+(tradeResult?.market?.funding_rate??'not available')+' · Open interest: '+(tradeResult?.market?.open_interest??'not available')"></div>
-<div class="notice" style="margin-top:14px" x-text="tradeResult?.disclaimer"></div>
-</div>
-<div class="answer-panel" style="margin-top:18px">
-<div class="eyebrow">03 / CAPITAL PROTECTION</div><h3>Position-size calculator</h3><p class="small-label">Turn your own entry and invalidation prices into a maximum position size. This does not place an order or recommend leverage.</p>
-<div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
-<div><label class="small-label">Account value (quote currency)</label><input class="field" type="number" min="0" step="any" x-model.number="tradeAccountSize"></div>
-<div><label class="small-label">Risk per idea (%)</label><input class="field" type="number" min="0.1" max="5" step="0.1" x-model.number="tradeRiskPercent"></div>
-<div><label class="small-label">Your planned entry</label><input class="field" type="number" min="0" step="any" x-model.number="tradeEntryPrice" placeholder="Enter your price"></div>
-<div><label class="small-label">Your stop / invalidation</label><input class="field" type="number" min="0" step="any" x-model.number="tradeStopPrice" placeholder="Enter stop price"></div>
-</div>
-<div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px">
-<div class="panel" style="padding:13px"><div class="small-label">Maximum planned loss</div><strong class="metric" x-text="tradeRiskAmount.toLocaleString(undefined,{maximumFractionDigits:2})"></strong></div>
-<div class="panel" style="padding:13px"><div class="small-label">Position quantity</div><strong class="metric" x-text="tradePositionSize?tradePositionSize.toLocaleString(undefined,{maximumFractionDigits:6}):'—'"></strong></div>
-</div>
-<p class="small-label" style="margin-top:10px" x-text="tradeEntryPrice>0&&tradeStopPrice>0?'Stop distance: '+(Math.abs(tradeEntryPrice-tradeStopPrice)/tradeEntryPrice*100).toFixed(2)+'% · Estimated quantity excludes fees, slippage and contract-specific rules.':'Enter a valid entry and stop to calculate position quantity.'"></p>
-</div>
-<div class="answer-panel" style="margin-top:18px"><div class="eyebrow">SIGNAL TRACK RECORD</div><h3>5-minute signal history</h3>
-<div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
-<div class="panel" style="padding:12px"><div class="small-label">EVALUATED SIGNALS</div><strong class="metric" x-text="tradeSignalStats?.evaluated??0"></strong></div>
-<div class="panel" style="padding:12px"><div class="small-label">DIRECTIONAL ACCURACY</div><strong class="metric" x-text="tradeSignalStats?.accuracy_percent==null?'—':tradeSignalStats.accuracy_percent+'%'"></strong></div>
-</div>
-<template x-for="item in tradeSignals.slice(0,10)" :key="item.id"><div class="list-row"><div class="grow"><strong x-text="item.symbol+' · '+item.direction"></strong><div class="small-label" x-text="new Date(item.generated_at).toLocaleString()+' · '+item.confidence_label+' '+item.confidence_score+'/100'"></div><div class="small-label" x-text="'Entry '+(item.entry_price??'—')+' · Result '+item.outcome_status"></div></div></div></template>
-<div class="small-label" x-show="!tradeSignals.length" style="margin-top:10px">Signals are saved here and evaluated after their five-minute horizon. WAIT signals are excluded from directional accuracy.</div>
-</div>
-<section class="trade-ai-copilot panel">
- <div class="section-heading"><div><div class="eyebrow">TRADE-ME AI · YOUR TRADING CO-PILOT</div><h3>Ask the market. Challenge the setup.</h3><p class="small-label">Chat with AI using the latest loaded market snapshot, technical indicators and order-book data.</p></div><span class="pill">AI assistant</span></div>
- <div class="trade-ai-shortcuts">
-  <button type="button" @click="askTradeCopilot('Give me a full market briefing for the selected pair, including trend, momentum, volume, order-book pressure and what would invalidate the view.')">Market briefing</button>
-  <button type="button" @click="askTradeCopilot('Explain the RSI, MACD, EMA trend and volume for this pair. Identify conflicting signals.')">Technical indicators</button>
-  <button type="button" @click="askTradeCopilot('Build a cautious trade plan with entry conditions, invalidation, stop loss, targets and risk/reward. Say NO TRADE if the data is not sufficient.')">Build trade plan</button>
-  <button type="button" @click="askTradeCopilot('Explain the order book imbalance and recent trade flow. Is buying or selling pressure stronger?')">Order-flow read</button>
-  <button type="button" @click="askTradeCopilot('Design a paper-trading grid or DCA strategy for this pair. Explain assumptions, range, spacing, risks and when to stop. Do not place orders.')">Strategy builder</button>
-  <button type="button" @click="askTradeCopilot('Give me a risk review for this setup and calculate position size using my risk settings if entry and stop are available.')">Risk review</button>
- </div>
- <div class="trade-ai-context"><span x-text="screenTicker?.lastPrice?'Context: '+screenSymbol+' · '+Number(screenTicker.lastPrice).toLocaleString(undefined,{maximumFractionDigits:8}):'Load a market pair to give AI live context'"></span><span x-text="screenUpdated?'Feed '+new Date(screenUpdated).toLocaleTimeString():'No market snapshot yet'"></span></div>
- <div class="trade-ai-messages" aria-live="polite">
-  <template x-for="(m,i) in tradeAiMessages" :key="m.id"><div :class="'trade-ai-message '+m.role"><div class="trade-ai-role" x-text="m.role==='assistant'?'TRADE-ME AI':'YOU'"></div><div class="trade-ai-text" x-text="m.text"></div><div class="small-label" x-show="m.streaming">Generating response…</div></div></template>
-  <div class="trade-ai-empty" x-show="!tradeAiMessages.length">Try: “What is moving BTC right now?” or “Build a conservative plan for this market.”</div>
- </div>
- <form class="trade-ai-compose" @submit.prevent="askTradeCopilot(tradeAiInput)"><textarea class="field" rows="2" maxlength="1200" x-model="tradeAiInput" placeholder="Ask about a coin, technical setup, risk, strategy or market conditions…"></textarea><button class="btn btn-gold" type="submit" :disabled="tradeAiBusy||!tradeAiInput.trim()" x-text="tradeAiBusy?'Thinking…':'Ask Trade-Me AI'"></button></form>
- <div class="small-label trade-ai-disclaimer">AI analysis is informational, may be wrong and is not a guarantee of profit. Market context is limited to data currently loaded in this workspace. AI cannot submit live orders.</div>
-</section>
-<div class="answer-panel" style="margin-top:18px"><div class="eyebrow">STRATEGY LAB · PAPER MODE</div><h3>Build an AI strategy</h3>
- <div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
-  <select class="field" x-model="tradeStrategyType"><option value="grid">Grid strategy</option><option value="dca">DCA strategy</option><option value="breakout">Breakout strategy</option><option value="trend">Trend-following strategy</option></select>
-  <select class="field" x-model="tradeStrategyRisk"><option value="low">Conservative risk</option><option value="medium">Balanced risk</option><option value="high">Aggressive risk</option></select>
- </div>
- <button class="btn btn-ghost full-btn" style="margin-top:10px" @click="buildTradeStrategy()" :disabled="tradeAiBusy">Generate strategy blueprint</button>
- <div class="answer-panel" x-show="tradeStrategyPlan" style="margin-top:12px;white-space:pre-wrap" x-text="tradeStrategyPlan"></div>
- <div class="small-label">Blueprints are paper-trading plans only. No bot is running and no exchange order is placed.</div>
-</div>
-<div class="answer-panel" style="margin-top:18px"><div class="eyebrow">EDGE TRACKER</div><h3>Trade journal</h3><div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px"><select class="field" x-model="tradeDirection"><option value="long">Long</option><option value="short">Short</option></select><select class="field" x-model="journalOutcome"><option value="planned">Planned</option><option value="win">Win</option><option value="loss">Loss</option><option value="cancelled">Cancelled</option></select></div><textarea class="field" rows="2" x-model="journalNote" placeholder="Trade thesis and notes"></textarea><button class="btn btn-gold full-btn" @click="saveJournal()" :disabled="!tradeResult">Save trade idea</button><template x-for="item in journal" :key="item.id"><div class="list-row"><div class="grow"><strong x-text="item.symbol+' · '+item.side.toUpperCase()"></strong><div class="small-label" x-text="item.bias+' · '+item.status"></div><div class="small-label" x-text="item.note"></div></div><button class="btn btn-ghost" @click="deleteJournal(item.id)">Remove</button></div></template></div><div class="answer-panel" style="margin-top:18px"><div class="eyebrow">LEVEL WATCH</div><h3>Price level watchlist</h3><div class="gridcards" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px"><input class="field" type="number" x-model="alertPrice" placeholder="Price level"><select class="field" x-model="alertDirection"><option value="above">Watch above</option><option value="below">Watch below</option></select></div><button class="btn btn-ghost full-btn" @click="saveAlert()">Save level</button><template x-for="alert in alerts" :key="alert.id"><div class="list-row"><strong x-text="alert.symbol+' · '+alert.price.toLocaleString()+' · '+alert.direction"></strong><button class="btn btn-ghost" @click="deleteAlert(alert.id)">Remove</button></div></template></div><p class="small-label" style="margin-top:14px">A market snapshot can become stale within seconds. AI analysis can be wrong. Confirm the market feed instrument, spread, contract specifications and stop distance yourself. Never risk money you cannot afford to lose.</p>
+ <div class="notice snapshot-disclaimer">Important: this version reads visible text from the uploaded image using OCR, then asks the AI to assess only that extracted text. It cannot reliably interpret candle shapes, chart drawings, colours or visual patterns. Verify every symbol, price and indicator on the original chart. It does not place trades and cannot guarantee results.</div>
 </section>
 
 
