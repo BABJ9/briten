@@ -122,6 +122,69 @@ async function rpc(name, args) {
   return supabaseRequest(`rpc/${name}`, { method: "POST", body: args });
 }
 
+function technicalSnapshot(rows) {
+  const candles = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      time: Number(row?.[0]),
+      open: Number(row?.[1]),
+      high: Number(row?.[2]),
+      low: Number(row?.[3]),
+      close: Number(row?.[4]),
+      volume: Number(row?.[5])
+    }))
+    .filter((c) => [c.time, c.open, c.high, c.low, c.close, c.volume].every(Number.isFinite))
+    .reverse();
+
+  if (!candles.length) throw new HttpError(502, "Bybit returned no usable candle data.");
+
+  const closes = candles.map((c) => c.close);
+  const ema = (period) => {
+    if (closes.length < period) return null;
+    const alpha = 2 / (period + 1);
+    let value = closes.slice(0, period).reduce((sum, price) => sum + price, 0) / period;
+    for (let i = period; i < closes.length; i++) value = closes[i] * alpha + value * (1 - alpha);
+    return value;
+  };
+
+  const changes = [];
+  for (let i = Math.max(1, closes.length - 14); i < closes.length; i++) {
+    changes.push(closes[i] - closes[i - 1]);
+  }
+  const gains = changes.reduce((sum, change) => sum + Math.max(0, change), 0);
+  const losses = changes.reduce((sum, change) => sum + Math.max(0, -change), 0);
+  const rsi = changes.length
+    ? losses === 0 ? (gains === 0 ? 50 : 100) : 100 - 100 / (1 + gains / losses)
+    : null;
+
+  const last = candles[candles.length - 1];
+  const previous = candles[candles.length - 2] || last;
+  const priorVolumes = candles.slice(-21, -1).map((c) => c.volume);
+  const averageVolume = priorVolumes.length
+    ? priorVolumes.reduce((sum, volume) => sum + volume, 0) / priorVolumes.length
+    : 0;
+  const trueRanges = [];
+  for (let i = Math.max(1, candles.length - 14); i < candles.length; i++) {
+    const current = candles[i];
+    const priorClose = candles[i - 1].close;
+    trueRanges.push(Math.max(
+      current.high - current.low,
+      Math.abs(current.high - priorClose),
+      Math.abs(current.low - priorClose)
+    ));
+  }
+
+  return {
+    last_price: last.close,
+    previous_close: previous.close,
+    ema_20: ema(20),
+    ema_50: ema(50),
+    rsi_14: rsi,
+    volume_ratio: averageVolume > 0 ? last.volume / averageVolume : null,
+    atr_14: trueRanges.length ? trueRanges.reduce((sum, value) => sum + value, 0) / trueRanges.length : null,
+    candle_count: candles.length
+  };
+}
+
 async function generateGeminiText({ system, prompt, maxOutputTokens = 1200, temperature = 0.2, timeoutMs = 30000 }) {
   if (!GEMINI_API_KEY) throw new HttpError(503, "Gemini is not configured on the server.");
 
@@ -132,7 +195,8 @@ async function generateGeminiText({ system, prompt, maxOutputTokens = 1200, temp
     "gemini-3.8-flash",
     "gemini-3.7-flash",
     "gemini-3.6-flash",
-    "gemini-3.5-flash"
+    "gemini-3.5-flash",
+    "gemini-2.5-flash"
   ])];
   let lastFailure = null;
 
