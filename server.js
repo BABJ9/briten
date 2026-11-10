@@ -326,7 +326,7 @@ function buildFiveMinuteSignal(market, now = new Date()) {
   if (Number.isFinite(volumeRatio) && volumeRatio < 0.6) flags.push("Relative volume is too thin");
   if (!Number.isFinite(Number(five.atr_14)) || Number(five.atr_14) <= 0) flags.push("ATR is unavailable");
   if (bias(frames["5"]) === 0) flags.push("Five-minute trend is not aligned");
-  const direction = flags.length >= 2 ? "WAIT" : adjusted >= 4 ? "BUY" : adjusted <= -4 ? "SELL" : "WAIT";
+  const direction = flags.includes("ATR is unavailable") || flags.includes("Five-minute trend is not aligned") || flags.length >= 2 ? "WAIT" : adjusted >= 4 ? "BUY" : adjusted <= -4 ? "SELL" : "WAIT";
   const entry = Number(market.last_price || five.last_price);
   const atr = Number(five.atr_14);
   const riskDistance = atr > 0 ? atr * 1.25 : null;
