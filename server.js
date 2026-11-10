@@ -322,7 +322,7 @@ async function handleApi(req, res, url) {
       response = await fetch("https://gen.pollinations.ai/v1/chat/completions", {
         method:"POST",
         headers:{ "Authorization":`Bearer ${process.env.POLLINATIONS_API_KEY}`, "Content-Type":"application/json", "Accept":"application/json" },
-        body:JSON.stringify({ model:"openai", messages:[{role:"system",content:system},...history,{role:"user",content:message}], temperature:0.35, max_tokens:1800 }),
+        body:JSON.stringify({ model:"google/gemini-3.8-flash", messages:[{role:"system",content:system},...history,{role:"user",content:message}], temperature:0.35, max_tokens:1800 }),
         signal:AbortSignal.timeout(90000)
       });
     } catch(error) { throw new HttpError(502, error.name==="TimeoutError"?"Pollinations chat timed out. Please retry.":"Pollinations could not be reached. Please retry."); }
@@ -330,7 +330,7 @@ async function handleApi(req, res, url) {
     if(!response.ok) throw new HttpError(502,String(result.error?.message||result.message||"Pollinations chat request failed.").slice(0,280));
     const reply=result.choices?.[0]?.message?.content;
     if(typeof reply!=="string"||!reply.trim()) throw new HttpError(502,"Pollinations returned an empty reply. Please retry.");
-    return json(res,200,{reply:reply.trim(),model:result.model||"openai",provider:"Pollinations"});
+    return json(res,200,{reply:reply.trim(),model:result.model||"google/gemini-3.8-flash",provider:"Pollinations"});
   }
 
   if (route === "/api/ai/snapshot-analysis" && method === "POST") {
