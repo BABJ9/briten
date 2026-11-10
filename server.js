@@ -192,13 +192,7 @@ async function generateGeminiText({ system, prompt, maxOutputTokens = 1200, temp
 
   // Always try Gemini 3.8 Flash first; retain stable Flash fallbacks for temporary outages.
   // An older Render GEMINI_MODEL value must not override the requested primary model.
-  const models = [...new Set([
-    "gemini-3.8-flash",
-    GEMINI_MODEL,
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash"
-  ].filter(Boolean))];
+  const models = ["gemini-3.8-flash"];
   let lastFailure = null;
 
   for (const model of models) {
@@ -246,7 +240,7 @@ async function generateGeminiText({ system, prompt, maxOutputTokens = 1200, temp
 async function streamGeminiText({ system, prompt, maxOutputTokens = 700, onText, timeoutMs = 30000 }) {
   if (!GEMINI_API_KEY) throw new HttpError(503, "Gemini AI is not configured on the server.");
   // Gemini 3.8 Flash is the primary streaming model; fall back only if it is unavailable.
-  const models = [...new Set(["gemini-3.8-flash", GEMINI_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"].filter(Boolean))];
+  const models = ["gemini-3.8-flash"];
   let lastFailure = null;
   for (const model of models) {
     let response;
@@ -587,7 +581,7 @@ ${JSON.stringify(market)}
 User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a concise but useful multi-timeframe aware decision framework; do not imply certainty.`;
     let gemini = null;
     let analysis = "AI commentary is temporarily unavailable. Review the live technical snapshot and retry the AI thesis shortly.";
-    try { gemini = await generateGeminiText({ system, prompt, maxOutputTokens: 1800, temperature: 0.2, timeoutMs: 35000 }); analysis = gemini.text; } catch (error) { console.error("Trading AI unavailable:", error.message); }
+    try { gemini = await generateGeminiText({ system, prompt, maxOutputTokens: 1800, temperature: 0.2, timeoutMs: 12000 }); analysis = gemini.text; } catch (error) { console.error("Trading AI unavailable:", error.message); }
     const candles = (klinePayloads[selectedIndex]?.result?.list || []).slice().reverse().slice(-100).map(row => ({ time:Number(row[0]),open:Number(row[1]),high:Number(row[2]),low:Number(row[3]),close:Number(row[4]),volume:Number(row[5]) }));
     
     const savedSignal = await dbInsert("aurapay_trade_signals", {
