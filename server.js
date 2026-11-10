@@ -302,7 +302,7 @@ async function handleApi(req, res, url) {
       hosting: "Render",
       configured: {
         supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
-        ai: process.env.POLLINATIONS_API_KEY ? "Pollinations vision API" : "not_configured"
+        ai: "Puter.js browser AI (user sign-in required)"
       },
       moneyMovement: "disabled-pending-new-provider"
     });
