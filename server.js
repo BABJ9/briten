@@ -10,7 +10,7 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API || process.env.GOOGLE_GENERATIVE_AI_API_KEY || "").trim();
-const GEMINI_MODEL = String(process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
+const GEMINI_MODEL = String(process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 const MAX_BODY = 1024 * 1024;
 
 class HttpError extends Error {
@@ -188,12 +188,9 @@ function technicalSnapshot(rows) {
 async function generateGeminiText({ system, prompt, maxOutputTokens = 1200, temperature = 0.2, timeoutMs = 30000 }) {
   if (!GEMINI_API_KEY) throw new HttpError(503, "Gemini is not configured on the server.");
 
-  // Honour the configured model first, then fail over across current stable Flash models.
-  // This also recovers automatically if Render still has an older GEMINI_MODEL value.
-  // Prefer Google's low-latency Flash-Lite models; avoid obsolete 2.5-first configuration.
+  // Always try Gemini 3.8 Flash first; retain stable Flash fallbacks for temporary outages.
+  // An older Render GEMINI_MODEL value must not override the requested primary model.
   const models = [...new Set([
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
     "gemini-3.8-flash",
     GEMINI_MODEL,
     "gemini-3.7-flash",
@@ -246,8 +243,8 @@ async function generateGeminiText({ system, prompt, maxOutputTokens = 1200, temp
 
 async function streamGeminiText({ system, prompt, maxOutputTokens = 700, onText, timeoutMs = 30000 }) {
   if (!GEMINI_API_KEY) throw new HttpError(503, "Gemini AI is not configured on the server.");
-  // Flash-Lite is the first choice for fast conversational replies.
-  const models = [...new Set(["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", GEMINI_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"].filter(Boolean))];
+  // Gemini 3.8 Flash is the primary streaming model; fall back only if it is unavailable.
+  const models = [...new Set(["gemini-3.8-flash", GEMINI_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"].filter(Boolean))];
   let lastFailure = null;
   for (const model of models) {
     let response;
