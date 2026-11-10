@@ -490,7 +490,7 @@ User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a con
         "X-Accel-Buffering": "no"
       });
       res.flushHeaders?.();
-      const send = (payload) => res.write(`data: ${JSON.stringify(payload)}\\n\\n`);
+      const send = (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
       send({ started: true });
       try {
         const gemini = await streamGeminiText({
