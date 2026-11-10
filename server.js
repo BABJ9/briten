@@ -336,7 +336,7 @@ async function handleApi(req, res, url) {
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Bazaar AI chat request failed.").slice(0, 280));
     const reply = result.choices?.[0]?.message?.content;
-    const textReply = typeof reply === "string" ? reply : Array.isArray(reply) ? reply.filter(p => p.type === "text").map(p => p.text).join("\\n") : "";
+    const textReply = typeof reply === "string" ? reply : Array.isArray(reply) ? reply.filter(p => p.type === "text").map(p => p.text).join("\n") : "";
     if (!textReply.trim()) throw new HttpError(502, "Bazaar AI returned an empty reply. Please retry.");
     return json(res, 200, { reply: textReply.trim(), model: result.model || BAZAAR_CHAT_MODEL, provider: "BazaarLink" });
   }
@@ -351,7 +351,7 @@ async function handleApi(req, res, url) {
     try { response = await fetch(BAZAAR_BASE_URL + "/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + process.env.BAZAARLINK_API_KEY, "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: BAZAAR_CHAT_MODEL, messages: [{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: image, detail: "high" } }] }], temperature: 0.2, max_tokens: 1800, reasoning_effort: "high" }), signal: AbortSignal.timeout(120000) }); }
     catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Bazaar vision analysis timed out. Please retry." : "Bazaar AI could not be reached."); }
     const result = await response.json().catch(() => ({})); if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Bazaar snapshot analysis failed.").slice(0, 280));
-    const analysis = result.choices?.[0]?.message?.content; const textAnalysis = typeof analysis === "string" ? analysis : Array.isArray(analysis) ? analysis.filter(p => p.type === "text").map(p => p.text).join("\\n") : "";
+    const analysis = result.choices?.[0]?.message?.content; const textAnalysis = typeof analysis === "string" ? analysis : Array.isArray(analysis) ? analysis.filter(p => p.type === "text").map(p => p.text).join("\n") : "";
     if (!textAnalysis.trim()) throw new HttpError(502, "Bazaar returned an empty analysis.");
     return json(res, 200, { analysis: textAnalysis.trim(), model: result.model || BAZAAR_CHAT_MODEL, provider: "BazaarLink", source: "Uploaded image snapshot" });
   }
