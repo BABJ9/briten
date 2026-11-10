@@ -297,6 +297,112 @@ async function streamGeminiText({ system, prompt, maxOutputTokens = 700, onText,
   throw new HttpError(502, lastFailure || "Gemini models are temporarily unavailable.");
 }
 
+
+function buildFiveMinuteSignal(market, now = new Date()) {
+  const frames = market.multi_timeframe || {};
+  const bias = (frame) => {
+    if (!frame || frame.ema_20 == null || frame.ema_50 == null) return 0;
+    if (frame.last_price > frame.ema_20 && frame.ema_20 > frame.ema_50) return 1;
+    if (frame.last_price < frame.ema_20 && frame.ema_20 < frame.ema_50) return -1;
+    return 0;
+  };
+  const score = bias(frames["5"]) * 2 + bias(frames["15"]) * 1.5 +
+    bias(frames["60"]) + bias(frames["240"]) * 0.5;
+  const five = frames["5"] || market.technicals || {};
+  const rsiValue = Number(five.rsi_14);
+  const volumeRatio = Number(five.volume_ratio);
+  let adjusted = score;
+  if (Number.isFinite(rsiValue)) {
+    if (rsiValue >= 52 && rsiValue <= 68) adjusted += 1;
+    else if (rsiValue >= 32 && rsiValue <= 48) adjusted -= 1;
+    else if (rsiValue > 75 || rsiValue < 25) adjusted *= 0.65;
+  }
+  if (Number.isFinite(volumeRatio) && volumeRatio >= 1.2) {
+    if (five.last_price > five.previous_close) adjusted += 0.75;
+    else if (five.last_price < five.previous_close) adjusted -= 0.75;
+  }
+  const imbalance = Number(market.orderbook_top5?.imbalance);
+  if (Number.isFinite(imbalance) && imbalance > 0.2) adjusted += 0.5;
+  else if (Number.isFinite(imbalance) && imbalance < -0.2) adjusted -= 0.5;
+
+  const flags = [];
+  if (market.spread_percent != null && market.spread_percent > 0.15) flags.push("Spread is elevated");
+  if (Number.isFinite(volumeRatio) && volumeRatio < 0.6) flags.push("Relative volume is too thin");
+  if (!Number.isFinite(Number(five.atr_14)) || Number(five.atr_14) <= 0) flags.push("ATR is unavailable");
+  if (bias(frames["5"]) === 0) flags.push("Five-minute trend is not aligned");
+  const direction = flags.length >= 2 ? "WAIT" : adjusted >= 4 ? "BUY" : adjusted <= -4 ? "SELL" : "WAIT";
+  const entry = Number(market.last_price || five.last_price);
+  const atr = Number(five.atr_14);
+  const riskDistance = atr > 0 ? atr * 1.25 : null;
+  const stop = direction === "BUY" && riskDistance ? entry - riskDistance
+    : direction === "SELL" && riskDistance ? entry + riskDistance : null;
+  const target = direction === "BUY" && riskDistance ? entry + riskDistance * 1.8
+    : direction === "SELL" && riskDistance ? entry - riskDistance * 1.8 : null;
+  const rawScore = Math.round(Math.min(85, 50 + Math.abs(adjusted) * 5));
+  const confidenceScore = direction === "WAIT" ? Math.min(60, rawScore) : rawScore;
+  const confidenceLabel = confidenceScore >= 78 ? "HIGH" : confidenceScore >= 65 ? "MEDIUM" : "LOW";
+  const generatedAt = now.getTime();
+  const nextFiveMinuteClose = Math.floor(generatedAt / 300000) * 300000 + 300000;
+  const rationale = direction === "WAIT"
+    ? "The five-minute setup does not meet the signal threshold or market-quality checks. No trade is recommended."
+    : `${direction} bias from five-minute EMA structure with higher-timeframe confirmation; RSI ${Number.isFinite(rsiValue) ? rsiValue.toFixed(1) : "n/a"}, relative volume ${Number.isFinite(volumeRatio) ? volumeRatio.toFixed(2) : "n/a"}x.`;
+  return {
+    timeframe: "5",
+    direction,
+    entry_price: Number.isFinite(entry) && entry > 0 ? entry : null,
+    stop_loss: stop != null && stop > 0 ? stop : null,
+    take_profit: target != null && target > 0 ? target : null,
+    confidence_score: confidenceScore,
+    confidence_label: confidenceLabel,
+    evidence_score: Number(adjusted.toFixed(2)),
+    rationale,
+    risk_flags: flags,
+    generated_at: new Date(generatedAt).toISOString(),
+    expires_at: new Date(nextFiveMinuteClose).toISOString()
+  };
+}
+
+async function settleExpiredTradeSignals(userId) {
+  const due = await dbSelect("aurapay_trade_signals", {
+    select: "id,symbol,category,direction,entry_price,stop_loss,take_profit,expires_at",
+    user_id: `eq.${userId}`, outcome_status: "eq.PENDING",
+    expires_at: `lte.${new Date().toISOString()}`, order: "expires_at.asc", limit: "30"
+  });
+  for (const signal of due) {
+    if (signal.direction === "WAIT") {
+      await dbPatch("aurapay_trade_signals", { id: `eq.${signal.id}`, user_id: `eq.${userId}` }, {
+        outcome_status: "UNRESOLVED", outcome_at: new Date().toISOString()
+      });
+      continue;
+    }
+    const expires = new Date(signal.expires_at).getTime();
+    const candleStart = expires - 300000;
+    const query = new URLSearchParams({
+      category: signal.category, symbol: signal.symbol, interval: "5",
+      start: String(candleStart), end: String(expires), limit: "5"
+    });
+    const response = await fetch(`https://api.bybit.com/v5/market/kline?${query}`, { signal: AbortSignal.timeout(10000) });
+    const payload = await response.json().catch(() => ({}));
+    const row = (payload.result?.list || []).find(item => Number(item[0]) === candleStart);
+    if (!response.ok || payload.retCode !== 0 || !row) continue;
+    const high = Number(row[2]), low = Number(row[3]), close = Number(row[4]);
+    const entry = Number(signal.entry_price);
+    const stopHit = signal.direction === "BUY" ? low <= Number(signal.stop_loss) : high >= Number(signal.stop_loss);
+    const targetHit = signal.direction === "BUY" ? high >= Number(signal.take_profit) : low <= Number(signal.take_profit);
+    let outcome = "FLAT";
+    if (stopHit && targetHit) outcome = "AMBIGUOUS";
+    else if (targetHit) outcome = "CORRECT";
+    else if (stopHit) outcome = "INCORRECT";
+    else if (signal.direction === "BUY") outcome = close > entry ? "CORRECT" : close < entry ? "INCORRECT" : "FLAT";
+    else outcome = close < entry ? "CORRECT" : close > entry ? "INCORRECT" : "FLAT";
+    const returnPct = entry > 0 ? (signal.direction === "BUY" ? (close - entry) / entry : (entry - close) / entry) * 100 : null;
+    await dbPatch("aurapay_trade_signals", { id: `eq.${signal.id}`, user_id: `eq.${userId}` }, {
+      outcome_status: outcome, outcome_price: close,
+      outcome_return_pct: returnPct, outcome_at: new Date().toISOString()
+    });
+  }
+}
+
 async function handleApi(req, res, url) {
   const route = url.pathname;
   const method = req.method || "GET";
@@ -316,6 +422,17 @@ async function handleApi(req, res, url) {
   }
 
   const user = await requireUser(req);
+
+  if (route === "/api/trading/signals" && method === "GET") {
+    await settleExpiredTradeSignals(user.id);
+    const signals = await dbSelect("aurapay_trade_signals", {
+      select: "id,symbol,category,timeframe,direction,entry_price,stop_loss,take_profit,confidence_score,confidence_label,rationale,generated_at,expires_at,outcome_status,outcome_price,outcome_return_pct,outcome_at",
+      user_id: `eq.${user.id}`, order: "generated_at.desc", limit: "50"
+    });
+    const scored = signals.filter(item => ["CORRECT","INCORRECT","FLAT"].includes(item.outcome_status));
+    const wins = scored.filter(item => item.outcome_status === "CORRECT").length;
+    return json(res, 200, { signals, stats: { evaluated: scored.length, correct: wins, incorrect: scored.filter(item => item.outcome_status === "INCORRECT").length, flat: scored.filter(item => item.outcome_status === "FLAT").length, accuracy_percent: scored.length ? Number((wins / scored.length * 100).toFixed(1)) : null } });
+  }
 
   if (route === "/api/my-accounts" && method === "GET") {
     return json(res, 200, { accounts: [], payment_links: [] });
@@ -380,13 +497,13 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const symbol = String(body.symbol || "BTCUSDT").trim().toUpperCase();
     const category = body.category === "spot" ? "spot" : "linear";
-    const interval = String(body.interval || "60");
+    const interval = "5";
     const allowedIntervals = new Set(["1", "3", "5", "15", "30", "60", "120", "240", "360", "720", "D", "W"]);
-    if (!/^[A-Z0-9]{3,24}$/.test(symbol) || !allowedIntervals.has(interval)) {
+    if (!/^[A-Z0-9]{3,24}$/.test(symbol)) {
       throw new HttpError(400, "Choose a valid Bybit market symbol and supported chart timeframe.");
     }
     
-    const intervals = [...new Set([interval, "15", "60", "240", "D"] )];
+    const intervals = ["5", "15", "60", "240", "D"];
     const tickerUrl = `https://api.bybit.com/v5/market/tickers?${new URLSearchParams({ category, symbol })}`;
     const requests = await Promise.all([
       fetch(tickerUrl, { signal: AbortSignal.timeout(12000) }),
@@ -461,8 +578,9 @@ async function handleApi(req, res, url) {
       volume_confirmation: Number.isFinite(volumeRatio) ? volumeRatio >= 1.2 ? "elevated" : volumeRatio < 0.6 ? "thin" : "normal" : "unavailable",
       risk_flags: riskFlags
     };
-    const system = `You are Aurapay Trade Intelligence, a rigorous crypto market analyst. Analyze ONLY the supplied Bybit public market snapshot and calculated indicators. Never claim certainty or 100% accuracy. Do not invent indicators, news, on-chain data, or events. Explain when data is insufficient. Return clear sections: Market regime; Directional bias (bullish/bearish/neutral); Evidence; Key support/resistance; Trade plan (entry zone, invalidation/stop, targets T1/T2, risk/reward only if calculable); Alternative scenario; Risk controls; What would change the view. If a setup is weak, say NO TRADE. Distinguish spot from linear derivatives and warn about leverage/liquidation risk. This is analysis, not order execution or financial advice. Do not give fabricated probabilities; if using confidence, use a qualitative low/medium/high label and explain why.`;
-    const prompt = `Analyze this market snapshot for a disciplined trader. Compare the selected timeframe with 15m, 1h, 4h and daily context where available; assess trend alignment, momentum, volatility, volume, liquidity/spread, order-book imbalance and derivatives funding/open interest where supplied. Treat order-book snapshots as noisy, not predictive. Use the supplied heuristic evidence score as a checklist, never as a win probability. Explicitly state NO TRADE when evidence conflicts, liquidity is poor, or invalidation cannot be defined. Separate observed facts from interpretation. Market data JSON:
+    const signal = buildFiveMinuteSignal(market, new Date());
+    const system = `You are Aurapay Trade Intelligence, a rigorous crypto market analyst focused on the 5-minute trading horizon. Analyze ONLY the supplied Bybit public market snapshot and calculated indicators. Never claim certainty or 100% accuracy. Do not invent indicators, news, on-chain data, or events. Explain when data is insufficient. Return clear sections: Market regime; Directional bias (bullish/bearish/neutral); Evidence; Key support/resistance; Trade plan (entry zone, invalidation/stop, targets T1/T2, risk/reward only if calculable); Alternative scenario; Risk controls; What would change the view. If a setup is weak, say NO TRADE. Distinguish spot from linear derivatives and warn about leverage/liquidation risk. This is analysis, not order execution or financial advice. Do not give fabricated probabilities; if using confidence, use a qualitative low/medium/high label and explain why.`;
+    const prompt = `Analyze this market snapshot for a disciplined trader. The trade decision is strictly for the 5-minute timeframe; use 15m, 1h and 4h only as context; assess trend alignment, momentum, volatility, volume, liquidity/spread, order-book imbalance and derivatives funding/open interest where supplied. Treat order-book snapshots as noisy, not predictive. Use the supplied heuristic evidence score as a checklist, never as a win probability. Explicitly state NO TRADE when evidence conflicts, liquidity is poor, or invalidation cannot be defined. Separate observed facts from interpretation. Market data JSON:
 ${JSON.stringify(market)}
 User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a concise but useful multi-timeframe aware decision framework; do not imply certainty.`;
     let gemini = null;
@@ -470,7 +588,14 @@ User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a con
     try { gemini = await generateGeminiText({ system, prompt, maxOutputTokens: 1800, temperature: 0.2, timeoutMs: 35000 }); analysis = gemini.text; } catch (error) { console.error("Trading AI unavailable:", error.message); }
     const candles = (klinePayloads[selectedIndex]?.result?.list || []).slice().reverse().slice(-100).map(row => ({ time:Number(row[0]),open:Number(row[1]),high:Number(row[2]),low:Number(row[3]),close:Number(row[4]),volume:Number(row[5]) }));
     
-    return json(res, 200, { symbol, category, interval, market, decision_context: market.decision_context, analysis, candles, ai_model: gemini?.model || null, ai_available: !!gemini, source: "Live Bybit market feed · AI-assisted analysis", generated_at: new Date().toISOString(), disclaimer: "Probabilistic analysis only. No prediction is guaranteed; verify the market and manage risk before trading." });
+    const savedSignal = await dbInsert("aurapay_trade_signals", {
+      user_id: user.id, symbol, category, timeframe: "5", direction: signal.direction,
+      entry_price: signal.entry_price, stop_loss: signal.stop_loss, take_profit: signal.take_profit,
+      confidence_score: signal.confidence_score, confidence_label: signal.confidence_label,
+      rationale: signal.rationale, market_snapshot: market,
+      generated_at: signal.generated_at, expires_at: signal.expires_at
+    });
+    return json(res, 200, { symbol, category, interval: "5", market, decision_context: market.decision_context, signal: { ...signal, id: savedSignal?.id || null, outcome_status: "PENDING" }, analysis, candles, ai_model: gemini?.model || null, ai_available: !!gemini, source: "Live Bybit 5-minute market feed · Gemini-assisted analysis", generated_at: new Date().toISOString(), disclaimer: "Probabilistic analysis only. No prediction is guaranteed; verify the market and manage risk before trading." });
   }
 
   if (route === "/api/ai/assistant" && method === "POST") {
