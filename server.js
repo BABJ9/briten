@@ -122,7 +122,8 @@ async function rpc(name, args) {
   return supabaseRequest(`rpc/${name}`, { method: "POST", body: args });
 }
 
-function technicalSnapshot(rows) {
+function technicalSnapshot(rows, timeframe = "5") {
+  const intervalMs = timeframe === "D" ? 86400000 : timeframe === "W" ? 604800000 : Number(timeframe) * 60000;
   const candles = (Array.isArray(rows) ? rows : [])
     .map((row) => ({
       time: Number(row?.[0]),
@@ -133,6 +134,7 @@ function technicalSnapshot(rows) {
       volume: Number(row?.[5])
     }))
     .filter((c) => [c.time, c.open, c.high, c.low, c.close, c.volume].every(Number.isFinite))
+    .filter((c) => c.time + intervalMs <= Date.now())
     .reverse();
 
   if (!candles.length) throw new HttpError(502, "Bybit returned no usable candle data.");
@@ -522,7 +524,7 @@ async function handleApi(req, res, url) {
     const multiTimeframe = {};
     intervals.forEach((tf, index) => {
       const rows = klinePayloads[index]?.result?.list || [];
-      if (rows.length) multiTimeframe[tf] = technicalSnapshot(rows);
+      if (rows.length) multiTimeframe[tf] = technicalSnapshot(rows, tf);
     });
     const technicals = multiTimeframe[interval];
     const orderbookData = payloads.at(-1);
