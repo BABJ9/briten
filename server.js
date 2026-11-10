@@ -302,7 +302,7 @@ async function handleApi(req, res, url) {
       hosting: "Render",
       configured: {
         supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
-        ai: "Puter.js keyless browser AI"
+        ai: "AI Horde anonymous free chat"
       },
       moneyMovement: "disabled-pending-new-provider"
     });
@@ -485,7 +485,7 @@ User preference: ${String(body.style || "balanced").slice(0, 30)}. Provide a con
   }
 
   if (route === "/api/ai/assistant" && method === "POST") {
-    throw new HttpError(410, "AI now runs in the browser using Puter.js. Use the updated frontend.");
+    throw new HttpError(410, "AI now runs in the browser using the free anonymous AI Horde endpoint. Use the updated frontend.");
   }
 
   throw new HttpError(404, "API endpoint not found.");
