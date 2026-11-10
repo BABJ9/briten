@@ -18,6 +18,61 @@
 <div class="panel" style="padding:12px"><div class="small-label">02 · CHALLENGE</div><strong>AI thesis</strong><div class="small-label">Trend · evidence · invalidation</div></div>
 <div class="panel" style="padding:12px"><div class="small-label">03 · PROTECT</div><strong>Risk sizing</strong><div class="small-label">Define loss before entry</div></div>
 </div>
+<div class="bybit-terminal">
+ <div class="bybit-market-head">
+  <div class="bybit-pair"><div><span class="bybit-coin">₿</span></div><div><strong x-text="screenSymbol"></strong><div class="small-label">Bybit · <span x-text="screenCategory==='linear'?'USDT Perpetual':'Spot'"></span></div></div></div>
+  <div class="bybit-last"><strong x-text="screenTicker?.lastPrice?Number(screenTicker.lastPrice).toLocaleString(undefined,{maximumFractionDigits:8}):'—'"></strong><span :class="Number(screenTicker?.price24hPcnt)>=0?'bybit-up':'bybit-down'" x-text="screenTicker?.price24hPcnt?((Number(screenTicker.price24hPcnt)*100).toFixed(2)+'%'):'—'"></span></div>
+  <div class="bybit-stat"><span>24h High</span><b x-text="screenTicker?.highPrice24h?Number(screenTicker.highPrice24h).toLocaleString():'—'"></b></div>
+  <div class="bybit-stat"><span>24h Low</span><b x-text="screenTicker?.lowPrice24h?Number(screenTicker.lowPrice24h).toLocaleString():'—'"></b></div>
+  <div class="bybit-stat"><span>24h Turnover</span><b x-text="screenTicker?.turnover24h?Number(screenTicker.turnover24h).toLocaleString(undefined,{maximumFractionDigits:0}):'—'"></b></div>
+ </div>
+ <div class="bybit-toolbar">
+  <div class="bybit-timeframes"><template x-for="tf in [{v:'1',l:'1m'},{v:'5',l:'5m'},{v:'15',l:'15m'},{v:'60',l:'1H'},{v:'240',l:'4H'},{v:'D',l:'1D'}]" :key="tf.v"><button type="button" :class="screenInterval===tf.v?'active':''" @click="screenInterval=tf.v;loadBybitScreen()"><span x-text="tf.l"></span></button></template></div>
+  <div class="small-label" x-text="screenLoading?'Updating live market…':screenUpdated?'Updated '+new Date(screenUpdated).toLocaleTimeString():'Waiting for Bybit feed'"></div>
+ </div>
+ <div class="bybit-main-grid">
+  <div class="bybit-chart-panel">
+   <div class="bybit-chart-title"><strong x-text="screenSymbol+' · '+({ '1':'1m','5':'5m','15':'15m','60':'1H','240':'4H','D':'1D'}[screenInterval])"></strong><span class="small-label">Candlestick chart · Bybit public market data</span></div>
+   <div class="bybit-chart-wrap">
+    <svg viewBox="0 0 1000 430" preserveAspectRatio="none" role="img" :aria-label="screenSymbol+' candlestick chart'">
+     <g class="bybit-grid-lines"><line x1="0" y1="70" x2="1000" y2="70"/><line x1="0" y1="150" x2="1000" y2="150"/><line x1="0" y1="230" x2="1000" y2="230"/><line x1="0" y1="310" x2="1000" y2="310"/><line x1="0" y1="390" x2="1000" y2="390"/></g>
+     <template x-for="c in screenChartCandles" :key="c.time">
+      <g>
+       <line :x1="c.x" :x2="c.x" :y1="c.highY" :y2="c.lowY" :class="c.up?'bybit-candle-up':'bybit-candle-down'" stroke-width="2"/>
+       <rect :x="c.x-4.2" :y="Math.min(c.openY,c.closeY)" width="8.4" :height="Math.max(2,Math.abs(c.closeY-c.openY))" :class="c.up?'bybit-candle-up':'bybit-candle-down'"/>
+      </g>
+     </template>
+     <line x1="0" x2="1000" :y1="screenCurrentY" :y2="screenCurrentY" class="bybit-current-line" stroke-dasharray="7 6"/>
+    </svg>
+    <div class="bybit-chart-price" x-show="screenTicker?.lastPrice" x-text="Number(screenTicker.lastPrice).toLocaleString(undefined,{maximumFractionDigits:8})"></div>
+    <div class="bybit-chart-empty" x-show="!screenCandles.length" x-text="screenLoading?'Loading candles…':(screenError||'Candlestick data unavailable')"></div>
+   </div>
+   <div class="bybit-volume-label">VOLUME</div>
+   <div class="bybit-volume-bars"><template x-for="c in screenChartCandles" :key="'v'+c.time"><span :class="c.up?'up':'down'" :style="'height:'+c.volumeHeight+'%'"></span></template></div>
+  </div>
+  <div class="bybit-side-panel">
+   <div class="bybit-panel-heading"><strong>Order book</strong><span class="small-label">Price (USDT) · Size</span></div>
+   <div class="bybit-book-head"><span>Price (USDT)</span><span>Size</span><span>Total</span></div>
+   <div class="bybit-book-asks"><template x-for="(level,i) in screenAsks" :key="'a'+i"><div class="bybit-book-row ask"><i :style="'width:'+level.depth+'%'"></i><span x-text="Number(level.price).toLocaleString(undefined,{maximumFractionDigits:8})"></span><span x-text="Number(level.size).toFixed(4)"></span><span x-text="Number(level.total).toFixed(4)"></span></div></template></div>
+   <div class="bybit-book-mid" x-text="screenTicker?.lastPrice?Number(screenTicker.lastPrice).toLocaleString(undefined,{maximumFractionDigits:8}):'—'"></div>
+   <div class="bybit-book-bids"><template x-for="(level,i) in screenBids" :key="'b'+i"><div class="bybit-book-row bid"><i :style="'width:'+level.depth+'%'"></i><span x-text="Number(level.price).toLocaleString(undefined,{maximumFractionDigits:8})"></span><span x-text="Number(level.size).toFixed(4)"></span><span x-text="Number(level.total).toFixed(4)"></span></div></template></div>
+  </div>
+ </div>
+ <div class="bybit-bottom-grid">
+  <div class="bybit-trades-panel"><div class="bybit-panel-heading"><strong>Recent trades</strong><span class="small-label">Live public feed</span></div><div class="bybit-trade-head"><span>Price (USDT)</span><span>Quantity</span><span>Time</span></div><template x-for="(t,i) in screenTrades" :key="t.time+i"><div class="bybit-trade-row"><b :class="t.side==='Buy'?'bybit-up':'bybit-down'" x-text="Number(t.price).toLocaleString(undefined,{maximumFractionDigits:8})"></b><span x-text="Number(t.size).toFixed(4)"></span><span x-text="new Date(Number(t.time)).toLocaleTimeString()"></span></div></template><div class="small-label" x-show="!screenTrades.length">Recent trades will appear when the feed loads.</div></div>
+  <div class="bybit-ticket">
+   <div class="bybit-panel-heading"><strong>Order panel</strong><span class="bybit-demo-tag">Preview only</span></div>
+   <div class="bybit-side-switch"><button type="button" :class="screenOrderSide==='Buy'?'buy-active':''" @click="screenOrderSide='Buy'">Buy / Long</button><button type="button" :class="screenOrderSide==='Sell'?'sell-active':''" @click="screenOrderSide='Sell'">Sell / Short</button></div>
+   <div class="bybit-ticket-tabs"><button type="button" :class="screenOrderType==='Market'?'active':''" @click="screenOrderType='Market'">Market</button><button type="button" :class="screenOrderType==='Limit'?'active':''" @click="screenOrderType='Limit'">Limit</button></div>
+   <label class="small-label">Price (USDT)</label><input class="field" type="number" min="0" step="any" x-model="screenOrderPrice" :placeholder="screenOrderType==='Market'?'Market price':String(screenTicker?.lastPrice||'')">
+   <label class="small-label">Quantity</label><input class="field" type="number" min="0" step="any" x-model="screenOrderQty" placeholder="Enter quantity">
+   <div class="bybit-ticket-summary"><span>Est. value</span><b x-text="screenOrderQty&&screenTicker?.lastPrice?(Number(screenOrderQty)*(Number(screenOrderPrice)||Number(screenTicker.lastPrice))).toLocaleString(undefined,{maximumFractionDigits:4})+' USDT':'—'"></b></div>
+   <button type="button" class="bybit-preview-button" :class="screenOrderSide==='Buy'?'buy-active':'sell-active'" @click="screenOrderNotice='This is a visual preview only. Live order execution is not connected in Aurapay-bm.'">Preview order</button>
+   <div class="small-label" x-show="screenOrderNotice" x-text="screenOrderNotice"></div>
+   <div class="small-label bybit-risk-note">No exchange orders are submitted from this screen.</div>
+  </div>
+ </div>
+</div>
 <div class="panel" style="padding:16px;margin:18px 0;border:1px solid rgba(214,173,98,.28)">
 <div class="section-heading"><div><div class="eyebrow">SNAPSHOT WORKSPACE</div><h3>Upload a trading screenshot</h3><p class="small-label">Choose a Bybit, TradingView or other chart screenshot from your phone gallery, or take a new photo.</p></div><span class="pill">Image review</span></div>
 <label class="btn btn-ghost full-btn" for="tradeSnapshotInput" style="display:flex;justify-content:center;align-items:center;gap:8px;margin:12px 0;cursor:pointer"><i data-lucide="image-plus"></i> Choose screenshot / take photo</label>
