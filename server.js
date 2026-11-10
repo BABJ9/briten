@@ -323,7 +323,7 @@ async function handleApi(req, res, url) {
     const imageParts = []; let totalImageBytes = 0;
     for (const item of (Array.isArray(body.images) ? body.images.slice(0, 8) : [])) {
       const data = String(item?.data || "");
-      const match = data.match(/^data:(image\\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+      const match = data.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
       if (!match) throw new HttpError(400, "Use PNG, JPG, WEBP or GIF images.");
       const bytes = Buffer.from(match[2], "base64"); totalImageBytes += bytes.length;
       if (!bytes.length || bytes.length > 12 * 1024 * 1024 || totalImageBytes > 24 * 1024 * 1024) throw new HttpError(413, "Images may be 12 MB each, with 24 MB total per message.");
@@ -343,7 +343,7 @@ async function handleApi(req, res, url) {
 
   if (route === "/api/ai/snapshot-analysis" && method === "POST") {
     requiredEnv("BAZAARLINK_API_KEY"); const body = await readBody(req); const image = String(body.image || "");
-    const match = image.match(/^data:(image\\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+    const match = image.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
     if (!match) throw new HttpError(400, "Upload a valid PNG, JPG, WEBP or GIF image.");
     const bytes = Buffer.from(match[2], "base64"); if (!bytes.length || bytes.length > 12 * 1024 * 1024) throw new HttpError(413, "Snapshot must be smaller than 12 MB.");
     const prompt = "Analyze this actual trading chart image visually. Read only legible values. Separate observed facts, interpretations and unknowns. Cover chart read, market structure, bullish/bearish scenarios, visible levels, possible setup only if supported, invalidation and risk. Do not invent live prices, indicators, news or probabilities. A screenshot is not live market data. Say WAIT/NO TRADE if uncertain. Never promise profits or place orders. Educational analysis only. User notes: " + String(body.notes || "None").slice(0, 2000);
