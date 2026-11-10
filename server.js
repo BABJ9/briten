@@ -563,3 +563,4 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Aurapay-bm listening on ${PORT}`);
 });
+// Render redeploy marker: AI Horde integration release.
