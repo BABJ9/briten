@@ -190,14 +190,16 @@ async function generateGeminiText({ system, prompt, maxOutputTokens = 1200, temp
 
   // Honour the configured model first, then fail over across current stable Flash models.
   // This also recovers automatically if Render still has an older GEMINI_MODEL value.
+  // Prefer Google's low-latency Flash-Lite models; avoid obsolete 2.5-first configuration.
   const models = [...new Set([
-    GEMINI_MODEL || "gemini-3.8-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
     "gemini-3.8-flash",
+    GEMINI_MODEL,
     "gemini-3.7-flash",
     "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-2.5-flash"
-  ])];
+    "gemini-3.5-flash"
+  ].filter(Boolean))];
   let lastFailure = null;
 
   for (const model of models) {
@@ -244,7 +246,8 @@ async function generateGeminiText({ system, prompt, maxOutputTokens = 1200, temp
 
 async function streamGeminiText({ system, prompt, maxOutputTokens = 700, onText, timeoutMs = 30000 }) {
   if (!GEMINI_API_KEY) throw new HttpError(503, "Gemini AI is not configured on the server.");
-  const models = [...new Set(["gemini-3.8-flash", GEMINI_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"].filter(Boolean))];
+  // Flash-Lite is the first choice for fast conversational replies.
+  const models = [...new Set(["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", GEMINI_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"].filter(Boolean))];
   let lastFailure = null;
   for (const model of models) {
     let response;
