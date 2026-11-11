@@ -10,7 +10,7 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
-const CLOUDFLARE_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
+const CLOUDFLARE_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 const CLOUDFLARE_URL = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${CLOUDFLARE_MODEL}`;
 const MAX_BODY = 36 * 1024 * 1024;
 
