@@ -1,15 +1,1 @@
-{
-  "name": "aster-ai",
-  "version": "23.0.0",
-  "private": true,
-  "type": "module",
-  "description": "Aster AI — a general-purpose AI companion hosted on Render with Supabase authentication and the original Hatchable Gemini model.",
-  "engines": {
-    "node": ">=22.0.0"
-  },
-  "scripts": {
-    "start": "node server.js",
-    "check": "node --check server.js && node --check public/app.js",
-    "prestart": "npm run check"
-  }
-}
+{"name":"trade-me","version":"1.0.0","private":true,"type":"module","description":"Trade-Me AI trading screenshot analysis powered by Google Gemini, with Supabase authentication and saved analysis history.","engines":{"node":">=22.0.0"},"scripts":{"start":"node server.js","check":"node --check server.js && node --check public/app.js","prestart":"npm run check"}}
