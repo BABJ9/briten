@@ -9,7 +9,7 @@ Trade-Me is a Node.js trading-analysis application hosted on Render. Supabase pr
 - Health check: `GET /api/health`
 - Supabase: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`
 - Cloudflare Workers AI: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` (server-only)
-- Sole model: `@cf/meta/llama-3.2-11b-vision-instruct`
+- Sole model: `@cf/qwen/qwen3.8-27b`
 
 Never put the Cloudflare token in frontend code, commit it to Git, or expose it in a client response. The frontend only receives the model/provider label and generated answer.
 
