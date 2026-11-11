@@ -329,7 +329,7 @@ async function handleApi(req, res, url) {
     }
     const system = "You are Trade-Me, a capable general-purpose AI assistant for complex reasoning, conversation, writing, coding, debugging, learning and visual understanding. Analyze attached images directly. Be accurate, explain assumptions and uncertainty, and never invent live market data. Never promise trading profits or place orders. Never ask for passwords, OTPs, private keys, seed phrases or full card details. User-selected personality: " + personality + ". Keep accuracy and safety above style.";
     let response;
-    try { response = await fetch(FREE_AI_BASE_URL + "/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: FREE_AI_MODEL, messages: [{ role: "system", content: system }, ...history, { role: "user", content: [{ type: "text", text: message }, ...imageParts] }], temperature: 0.35, max_tokens: 2400,  }), signal: AbortSignal.timeout(120000) }); }
+    try { response = await fetch(FREE_AI_BASE_URL + "/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: FREE_AI_MODEL, messages: [{ role: "system", content: system }, ...history, { role: "user", content: [{ type: "text", text: message }, ...imageParts] }], temperature: 0.35, max_tokens: 2400 }), signal: AbortSignal.timeout(120000) }); }
     catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Free AI model timed out. Please retry." : "Free AI service is temporarily unavailable. Please retry."); }
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Free AI chat request failed.").slice(0, 280));
@@ -351,7 +351,7 @@ async function handleApi(req, res, url) {
     const result = await response.json().catch(() => ({})); if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Free snapshot analysis failed.").slice(0, 280));
     const analysis = result.choices?.[0]?.message?.content; const textAnalysis = typeof analysis === "string" ? analysis : Array.isArray(analysis) ? analysis.filter(p => p.type === "text").map(p => p.text).join("\n") : "";
     if (!textAnalysis.trim()) throw new HttpError(502, "Free model returned an empty analysis.");
-    return json(res, 200, { analysis: textAnalysis.trim(), model: result.model || FREE_AI_MODEL, provider: "BazaarLink", source: "Uploaded image snapshot" });
+    return json(res, 200, { analysis: textAnalysis.trim(), model: result.model || FREE_AI_MODEL, provider: "OVHcloud AI Endpoints", source: "Uploaded image snapshot" });
   }
 
   if (route === "/api/ai/image-generation" && method === "POST") {
