@@ -8,8 +8,9 @@ const PUBLIC = path.join(ROOT, "public");
 const PORT = Number(process.env.PORT || 3000);
 const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
+const ASTER_HATCHABLE_CHAT_URL = process.env.ASTER_HATCHABLE_CHAT_URL || "";
+const ASTER_HATCHABLE_PROXY_KEY = process.env.ASTER_HATCHABLE_PROXY_KEY || "";
+const ASTER_MODEL = process.env.ASTER_MODEL || "gemini";
 const MAX_BODY = 36 * 1024 * 1024;
 
 class HttpError extends Error {
@@ -61,18 +62,17 @@ async function requireUser(req) {
   return user;
 }
 
-async function generateAster(contents, systemInstruction, generationConfig = {}) {
-  requiredEnv("GEMINI_API_KEY");
+async function generateAster(messages, mode, userId) {
+  requiredEnv("ASTER_HATCHABLE_CHAT_URL", "ASTER_HATCHABLE_PROXY_KEY");
   let response;
   try {
-    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+    response = await fetch(ASTER_HATCHABLE_CHAT_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents,
-        generationConfig
-      }),
+      headers: {
+        "Content-Type": "application/json",
+        "x-aster-proxy-key": ASTER_HATCHABLE_PROXY_KEY
+      },
+      body: JSON.stringify({ messages, mode, userId }),
       signal: AbortSignal.timeout(120000)
     });
   } catch (error) {
@@ -80,14 +80,11 @@ async function generateAster(contents, systemInstruction, generationConfig = {})
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message = data.error?.message || "Aster could not complete that request. Check the Gemini API key and model access.";
+    const message = data.error || "Aster's Hatchable AI service could not complete the request.";
     throw new HttpError(response.status === 429 ? 429 : 502, String(message).slice(0, 350));
   }
-  const answer = (data.candidates?.[0]?.content?.parts || [])
-    .filter(part => typeof part.text === "string")
-    .map(part => part.text).join("\n").trim();
-  if (!answer) throw new HttpError(502, "Aster returned an empty response. Please try again.");
-  return { reply: answer, model: GEMINI_MODEL, provider: "Google Gemini", assistant: "Aster" };
+  if (!data.reply) throw new HttpError(502, "Aster returned an empty response. Please try again.");
+  return { reply: data.reply, model: data.model || ASTER_MODEL, provider: "Hatchable AI", assistant: "Aster" };
 }
 
 async function handleApi(req, res, url) {
@@ -98,8 +95,8 @@ async function handleApi(req, res, url) {
       status: "ready",
       configured: {
         authentication: Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY),
-        ai: Boolean(GEMINI_API_KEY),
-        model: GEMINI_MODEL
+        ai: Boolean(ASTER_HATCHABLE_CHAT_URL && ASTER_HATCHABLE_PROXY_KEY),
+        model: ASTER_MODEL
       }
     });
   }
@@ -108,21 +105,21 @@ async function handleApi(req, res, url) {
     throw new HttpError(404, "Aster endpoint not found.");
   }
 
-  await requireUser(req);
+  const user = await requireUser(req);
   const body = await readBody(req);
   const message = String(body.message || "").trim();
   const images = Array.isArray(body.images) ? body.images.slice(0, 8) : [];
   if (!message && !images.length) throw new HttpError(400, "Write a message or attach an image.");
   if (message.length > 16000) throw new HttpError(400, "Keep messages under 16,000 characters.");
 
-  const history = Array.isArray(body.history) ? body.history.slice(-24)
+  const history = Array.isArray(body.history) ? body.history.slice(-23)
     .filter(item => item && ["user", "assistant", "model"].includes(item.role) && typeof item.content === "string")
     .map(item => ({
-      role: item.role === "assistant" ? "model" : item.role,
-      parts: [{ text: item.content.slice(0, 10000) }]
+      role: item.role === "model" ? "assistant" : item.role,
+      content: item.content.slice(0, 10000)
     })) : [];
 
-  const parts = [{ text: message || "Please inspect the attached image and explain what you see." }];
+  const parts = [{ type: "text", text: message || "Please inspect the attached image and explain what you see." }];
   let totalBytes = 0;
   for (const item of images) {
     const raw = String(item?.data || "");
@@ -133,7 +130,7 @@ async function handleApi(req, res, url) {
     if (!bytes.length || bytes.length > 8 * 1024 * 1024 || totalBytes > 16 * 1024 * 1024) {
       throw new HttpError(413, "Keep each image under 8 MB and total image size under 16 MB.");
     }
-    parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+    parts.push({ type: "image", image: raw });
   }
 
   const modes = {
@@ -144,25 +141,8 @@ async function handleApi(req, res, url) {
     plan: "Act as a practical planning partner. Turn goals into sequenced, realistic actions."
   };
   const mode = String(body.mode || "chat").slice(0, 30);
-  const modeContext = String(body.systemContext || "").slice(0, 1200);
-  const personality = String(body.personality || "Warm, thoughtful, natural and clear").slice(0, 1200);
-  const system = [
-    "You are Aster, a capable, warm, deeply useful general-purpose AI assistant.",
-    "This product is entirely an AI assistant. It is not a fintech app, wallet, trading terminal, payment product, or formal business dashboard.",
-    "Help with conversation, complex reasoning, writing, coding, debugging, mathematics, learning, planning, document interpretation and visual understanding.",
-    "Be curious, accurate, practical and conversational. Adapt your depth to the user's request.",
-    "For difficult tasks, reason carefully and provide clear conclusions and concise explanations without exposing private chain-of-thought.",
-    "Explain assumptions and uncertainty. Never invent current facts or claim actions you did not perform.",
-    "Analyze user-provided images directly. Never ask for passwords, OTPs, API keys, private keys, seed phrases or full card details.",
-    modes[mode] || modes.chat,
-    modeContext,
-    "Response style: " + personality
-  ].filter(Boolean).join("\n");
-  const result = await generateAster(
-    [...history, { role: "user", parts }],
-    system,
-    { temperature: 0.7, maxOutputTokens: 4096 }
-  );
+  const userMessages = [...history, { role: "user", content: parts.length === 1 ? parts[0].text : parts }];
+  const result = await generateAster(userMessages, mode, user.id);
   return json(res, 200, result);
 }
 
@@ -233,4 +213,4 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "0.0.0.0", () => console.log(`Aster AI listening on ${PORT} using ${GEMINI_MODEL}`));
+server.listen(PORT, "0.0.0.0", () => console.log(`Aster AI listening on ${PORT} using Hatchable model alias ${ASTER_MODEL}`));
