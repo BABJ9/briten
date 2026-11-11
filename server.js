@@ -10,8 +10,27 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const MAX_BODY = 36 * 1024 * 1024;
-const FREE_AI_BASE_URL = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1";
-const FREE_AI_MODEL = "Qwen3.6-27B";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
+
+async function generateGemini(contents, systemInstruction, generationConfig = {}) {
+  if (!GEMINI_API_KEY) throw new HttpError(503, "Aster AI is not connected yet. Add GEMINI_API_KEY in the Render environment settings.");
+  let response;
+  try {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+      method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: systemInstruction }] }, contents, generationConfig }),
+      signal: AbortSignal.timeout(120000)
+    });
+  } catch (error) {
+    throw new HttpError(502, error.name === "TimeoutError" ? "Aster AI took too long to respond. Please try again." : "Aster AI is temporarily unreachable. Please retry.");
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new HttpError(502, String(data.error?.message || "Aster AI request failed. Check the Gemini API key and model access.").slice(0, 300));
+  const answer = (data.candidates?.[0]?.content?.parts || []).filter(part => typeof part.text === "string").map(part => part.text).join("\n");
+  if (!answer.trim()) throw new HttpError(502, "Aster AI returned an empty response. Please retry.");
+  return { reply: answer.trim(), model: GEMINI_MODEL };
+}
 
 class HttpError extends Error {
   constructor(status, message, details = null) {
@@ -304,7 +323,7 @@ async function handleApi(req, res, url) {
       hosting: "Render",
       configured: {
         supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
-        ai: "OVHcloud AI Endpoints (anonymous free tier)"
+        ai: GEMINI_API_KEY ? `Google Gemini (${GEMINI_MODEL})` : "Gemini key required"
       },
       moneyMovement: "disabled-pending-new-provider"
     });
@@ -315,43 +334,41 @@ async function handleApi(req, res, url) {
   if (route === "/api/ai/chat" && method === "POST") {
     const body = await readBody(req);
     const message = String(body.message || "").trim();
-    if (!message || message.length > 16000) throw new HttpError(400, "Enter a message up to 16,000 characters.");
-    const personality = String(body.personality || "balanced").slice(0, 1200);
-    const history = Array.isArray(body.history) ? body.history.slice(-24).filter(m => m && ["user", "assistant"].includes(m.role) && typeof m.content === "string").map(m => ({ role: m.role, content: m.content.slice(0, 10000) })) : [];
-    const imageParts = []; let totalImageBytes = 0;
-    for (const item of (Array.isArray(body.images) ? body.images.slice(0, 8) : [])) {
-      const data = String(item?.data || "");
-      const match = data.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
-      if (!match) throw new HttpError(400, "Use PNG, JPG, WEBP or GIF images.");
-      const bytes = Buffer.from(match[2], "base64"); totalImageBytes += bytes.length;
-      if (!bytes.length || bytes.length > 6 * 1024 * 1024 || totalImageBytes > 8 * 1024 * 1024) throw new HttpError(413, "For this free vision model, keep each image under 6 MB and the total under 8 MB.");
-      imageParts.push({ type: "image_url", image_url: { url: data, detail: "auto" } });
+    const images = Array.isArray(body.images) ? body.images.slice(0, 8) : [];
+    if (!message && !images.length) throw new HttpError(400, "Write a message or attach an image.");
+    if (message.length > 16000) throw new HttpError(400, "Keep messages under 16,000 characters.");
+    const personality = String(body.personality || "Warm, thoughtful, natural and clear").slice(0, 1200);
+    const history = Array.isArray(body.history) ? body.history.slice(-24)
+      .filter(item => item && ["user", "assistant", "model"].includes(item.role) && typeof item.content === "string")
+      .map(item => ({ role: item.role === "assistant" ? "model" : item.role, parts: [{ text: item.content.slice(0, 10000) }] })) : [];
+    const parts = [{ text: message || "Please inspect the attached image and explain what you see." }];
+    let totalBytes = 0;
+    for (const item of images) {
+      const raw = String(item?.data || "");
+      const match = raw.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+      if (!match) throw new HttpError(400, "Attach PNG, JPG, WEBP or GIF images only.");
+      const bytes = Buffer.from(match[2], "base64");
+      totalBytes += bytes.length;
+      if (!bytes.length || bytes.length > 8 * 1024 * 1024 || totalBytes > 16 * 1024 * 1024) throw new HttpError(413, "Keep each image under 8 MB and total image size under 16 MB.");
+      parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
     }
-    const system = "You are Trade-Me, a capable general-purpose AI assistant for complex reasoning, conversation, writing, coding, debugging, learning and visual understanding. Analyze attached images directly. Be accurate, explain assumptions and uncertainty, and never invent live market data. Never promise trading profits or place orders. Never ask for passwords, OTPs, private keys, seed phrases or full card details. User-selected personality: " + personality + ". Keep accuracy and safety above style.";
-    let response;
-    try { response = await fetch(FREE_AI_BASE_URL + "/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: FREE_AI_MODEL, messages: [{ role: "system", content: system }, ...history, { role: "user", content: [{ type: "text", text: message }, ...imageParts] }], temperature: 0.35, max_tokens: 2400 }), signal: AbortSignal.timeout(120000) }); }
-    catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Free AI model timed out. Please retry." : "Free AI service is temporarily unavailable. Please retry."); }
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Free AI chat request failed.").slice(0, 280));
-    const reply = result.choices?.[0]?.message?.content;
-    const textReply = typeof reply === "string" ? reply : Array.isArray(reply) ? reply.filter(p => p.type === "text").map(p => p.text).join("\n") : "";
-    if (!textReply.trim()) throw new HttpError(502, "Free AI returned an empty reply. Please retry.");
-    return json(res, 200, { reply: textReply.trim(), model: result.model || FREE_AI_MODEL, provider: "OVHcloud AI Endpoints" });
+    const mode = String(body.mode || "chat").slice(0, 30);
+    const modeContext = String(body.systemContext || "").slice(0, 1200);
+    const system = "You are Aster, a capable, warm, deeply useful general-purpose AI assistant. This product is an AI assistant, not a fintech, wallet, trading terminal, or formal business dashboard. Help with complex reasoning, conversation, writing, coding, debugging, mathematics, learning, planning, document interpretation and visual understanding. Be curious, accurate, practical and conversational. For difficult tasks, reason carefully and give clear, well-structured answers without exposing private chain-of-thought. Explain assumptions and uncertainty; never invent current facts or claim actions you did not perform. Analyze user-provided images directly. Never ask for passwords, OTPs, API keys, private keys, seed phrases or full card details. Current workspace mode: " + mode + ". " + modeContext + " Response style: " + personality + ".";
+    const result = await generateGemini([...history, { role: "user", parts }], system, { temperature: 0.7, maxOutputTokens: 4096 });
+    return json(res, 200, { ...result, provider: "Google Gemini", assistant: "Aster" });
   }
 
   if (route === "/api/ai/snapshot-analysis" && method === "POST") {
-    const body = await readBody(req); const image = String(body.image || "");
-    const match = image.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+    const body = await readBody(req);
+    const raw = String(body.image || "");
+    const match = raw.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
     if (!match) throw new HttpError(400, "Upload a valid PNG, JPG, WEBP or GIF image.");
-    const bytes = Buffer.from(match[2], "base64"); if (!bytes.length || bytes.length > 7 * 1024 * 1024) throw new HttpError(413, "Snapshot must be smaller than 7 MB for the free vision model.");
-    const prompt = "Analyze this actual trading chart image visually. Read only legible values. Separate observed facts, interpretations and unknowns. Cover chart read, market structure, bullish/bearish scenarios, visible levels, possible setup only if supported, invalidation and risk. Do not invent live prices, indicators, news or probabilities. A screenshot is not live market data. Say WAIT/NO TRADE if uncertain. Never promise profits or place orders. Educational analysis only. User notes: " + String(body.notes || "None").slice(0, 2000);
-    let response;
-    try { response = await fetch(FREE_AI_BASE_URL + "/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: FREE_AI_MODEL, messages: [{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: image, detail: "high" } }] }], temperature: 0.2, max_tokens: 1800 }), signal: AbortSignal.timeout(120000) }); }
-    catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Free vision model timed out. Please retry." : "Free AI service is temporarily unavailable."); }
-    const result = await response.json().catch(() => ({})); if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Free snapshot analysis failed.").slice(0, 280));
-    const analysis = result.choices?.[0]?.message?.content; const textAnalysis = typeof analysis === "string" ? analysis : Array.isArray(analysis) ? analysis.filter(p => p.type === "text").map(p => p.text).join("\n") : "";
-    if (!textAnalysis.trim()) throw new HttpError(502, "Free model returned an empty analysis.");
-    return json(res, 200, { analysis: textAnalysis.trim(), model: result.model || FREE_AI_MODEL, provider: "OVHcloud AI Endpoints", source: "Uploaded image snapshot" });
+    const result = await generateGemini([{ role: "user", parts: [
+      { text: "Inspect this image carefully. Describe visible content, extract readable text, distinguish observation from inference, and identify uncertainty. User notes: " + String(body.notes || "").slice(0, 2000) },
+      { inlineData: { mimeType: match[1], data: match[2] } }
+    ] }], "You are Aster, a careful multimodal AI assistant. Never invent details that are not visible.", { temperature: 0.3, maxOutputTokens: 3000 });
+    return json(res, 200, { analysis: result.reply, model: result.model, provider: "Google Gemini" });
   }
 
   if (route === "/api/trading/signals" && method === "GET") {
@@ -499,4 +516,4 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Trade-Me listening on ${PORT}`);
 });
-// Render release: anonymous free OVHcloud Qwen vision and chat model.
+// Aster AI release: Google Gemini 3 Flash Preview.
