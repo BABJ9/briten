@@ -10,8 +10,8 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
-const CLOUDFLARE_MODEL = "@cf/google/gemma-4-26b-a4b-it";
-const CLOUDFLARE_URL = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${CLOUDFLARE_MODEL}`;
+const CLOUDFLARE_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
+const CLOUDFLARE_URL = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`;
 const MAX_BODY = 36 * 1024 * 1024;
 
 class HttpError extends Error {
@@ -76,7 +76,7 @@ async function callCloudflare(history, parts) {
     r = await fetch(CLOUDFLARE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + CLOUDFLARE_API_TOKEN },
-      body: JSON.stringify({ messages, temperature: 0.2, max_tokens: 1800 }),
+      body: JSON.stringify({ model: CLOUDFLARE_MODEL, messages, temperature: 0.2, max_tokens: 1800 }),
       signal: AbortSignal.timeout(90000)
     });
   } catch (e) {
@@ -92,7 +92,7 @@ async function callCloudflare(history, parts) {
         ? "Cloudflare requires you to accept the model's Meta license before its first use."
         : "Cloudflare AI could not complete the request. Check the model and account configuration.");
   }
-  const raw = data.result?.response ?? data.result?.output_text ?? data.result?.content ?? data.response;
+  const raw = data.choices?.[0]?.message?.content ?? data.result?.response ?? data.result?.output_text ?? data.result?.content ?? data.response;
   const answer = Array.isArray(raw) ? raw.map(x => x.text || "").join("\n").trim() : String(raw || "").trim();
   if (!answer) throw new HttpError(502, "Cloudflare AI returned an empty analysis. Please retry with a clearer screenshot.");
   return { answer, model: CLOUDFLARE_MODEL };
