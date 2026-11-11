@@ -14,20 +14,21 @@ async function requireUser(req){const token=(String(req.headers.authorization||"
 const SYSTEM_PROMPT="You are Trade-Me's institutional-style technical analysis engine. Produce a clear, disciplined trading terminal report inspired by the depth and information hierarchy of leading professional exchange chart-analysis screens, but do not mention, imitate logos, or claim affiliation with any exchange or third-party service. Analyze ONLY what is visible in uploaded chart screenshots and details supplied by the user. Do not claim live market access, current prices, order-book data, funding, open interest, news, or indicator values unless explicitly visible/provided. Never fabricate price levels, candles, indicators, timestamps or market data. If the screenshot is blurry, cropped, missing its price scale, or ambiguous, clearly state the limitation and default to WAIT.\n\nFor every chart analysis use this exact structured report, with concise, specific bullet points:\n1. MARKET SNAPSHOT — asset/pair and timeframe (use Unknown if not shown), visible price context, session/context only if evidenced.\n2. TREND & MARKET STRUCTURE — bullish/bearish/ranging; swing highs/lows; HH/HL or LH/LL; BOS/CHOCH only when clearly evidenced; momentum and candle behaviour.\n3. KEY LEVELS — support, resistance, supply/demand or liquidity zones; give exact prices only when readable, otherwise describe the zone without guessing.\n4. INDICATOR READ — interpret only indicators visibly present and legible; otherwise say Not visible.\n5. TRADE PLAN — BIAS: exactly BUY, SELL, WAIT or NEUTRAL; setup type; entry or entry zone; stop/invalidation; TP1, TP2 and TP3 if justified; estimated risk/reward only when levels allow calculation. For every unavailable level write Not reliably identifiable. Never force a trade.\n6. CONFIRMATION CHECKLIST — concrete candle close, retest, breakout, rejection or momentum evidence needed before entry.\n7. INVALIDATION & RISK — what would disprove the setup, nearby opposing levels, volatility/stop placement cautions, and why standing aside may be better.\n8. CONFIDENCE — 0–100 score for the quality/completeness of the visible evidence, NOT a probability of profit or win rate; explain the score.\n9. FINAL VERDICT — one-line actionable summary: BUY / SELL / WAIT / NEUTRAL, with the key reason.\n\nKeep the analysis balanced and avoid false precision. If the user asks a follow-up question, answer conversationally but preserve the same evidence-only discipline. Never promise profit, guarantee accuracy, or encourage reckless leverage. This is educational chart interpretation, not personalized financial advice. Do not give financial advice disclaimers repeatedly; keep one concise risk reminder when relevant.";
 function signalOf(s){const m=s.match(/(?:TRADE BIAS|BIAS|SIGNAL)\s*[:：-]*\s*(BUY|SELL|WAIT|NEUTRAL)/i);return m?m[1].toUpperCase():"WAIT";}
 function confidenceOf(s){const m=s.match(/CONFIDENCE\s*[:：-]*\s*(\d{1,3})\s*%?/i);return m?Math.min(100,Number(m[1])):null;}
-async function callHuggingFace(history,parts){
- requiredEnv("HF_TOKEN");
+async function callOpenAI(history,parts){
+ requiredEnv("OPENAI_API_KEY");
  const messages=[{role:"system",content:SYSTEM_PROMPT}];
  for(const item of history){if(!item||typeof item.content!=="string")continue;messages.push({role:item.role==="assistant"||item.role==="model"?"assistant":"user",content:item.content.slice(0,6000)});}
- const content=parts.map(part=>part.inlineData?({type:"image_url",image_url:{url:"data:"+part.inlineData.mimeType+";base64,"+part.inlineData.data}}):({type:"text",text:part.text}));
+ const content=parts.map(part=>part.inlineData?({type:"image_url",image_url:{url:"data:"+part.inlineData.mimeType+";base64,"+part.inlineData.data,detail:"high"}}):({type:"text",text:part.text}));
  messages.push({role:"user",content});
- const model=process.env.HF_MODEL||"Qwen/Qwen2.5-VL-7B-Instruct";
+ const model=process.env.OPENAI_MODEL||"gpt-4o";
  let r;
- try{r=await fetch("https://router.huggingface.co/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+process.env.HF_TOKEN},body:JSON.stringify({model,messages,temperature:0.2,top_p:0.85,max_tokens:1800,stream:false}),signal:AbortSignal.timeout(90000)});}
- catch(e){throw new HttpError(502,e.name==="TimeoutError"?"Hugging Face took too long. Please retry.":"Hugging Face is temporarily unreachable.");}
+ try{r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+process.env.OPENAI_API_KEY},body:JSON.stringify({model,messages,temperature:0.2,max_tokens:1800}),signal:AbortSignal.timeout(90000)});}
+ catch(e){throw new HttpError(502,e.name==="TimeoutError"?"OpenAI took too long. Please retry.":"OpenAI is temporarily unreachable.");}
  const data=await r.json().catch(()=>({}));
- if(!r.ok)throw new HttpError(r.status===429?429:502,String(data.error?.message||data.error||"Hugging Face rejected the request.").slice(0,300));
- const answer=String(data.choices?.[0]?.message?.content||"").trim();
- if(!answer)throw new HttpError(502,"Hugging Face returned an empty analysis. Try again or use a clearer screenshot.");
+ if(!r.ok)throw new HttpError(r.status===429?429:502,String(data.error?.message||"OpenAI rejected the request.").slice(0,300));
+ const raw=data.choices?.[0]?.message?.content;
+ const answer=Array.isArray(raw)?raw.map(x=>x.text||"").join("\n").trim():String(raw||"").trim();
+ if(!answer)throw new HttpError(502,"OpenAI returned an empty analysis. Please retry with a clearer screenshot.");
  return {answer,model};
 }
 async function saveAnalysis(token,user,body,analysis){
@@ -37,7 +38,7 @@ async function saveAnalysis(token,user,body,analysis){
  const rows=await r.json().catch(()=>[]);return{saved:true,analysisId:rows[0]?.id||null};
 }
 async function handleApi(req,res,url){
- if(url.pathname==="/api/health"&&req.method==="GET")return json(res,200,{ok:true,app:"Trade-Me",status:"ready",configured:{authentication:Boolean(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY),database:Boolean(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY),ai:Boolean(process.env.HF_TOKEN),provider:"Hugging Face",model:process.env.HF_MODEL||"Qwen/Qwen2.5-VL-7B-Instruct"}});
+ if(url.pathname==="/api/health"&&req.method==="GET")return json(res,200,{ok:true,app:"Trade-Me",status:"ready",configured:{authentication:Boolean(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY),database:Boolean(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY),ai:Boolean(process.env.OPENAI_API_KEY),provider:"OpenAI",model:process.env.OPENAI_MODEL||"gpt-4o"}});
  if(url.pathname!=="/api/trading/analyze"||req.method!=="POST")throw new HttpError(404,"Trade-Me endpoint not found.");
  const auth=await requireUser(req),body=await readBody(req),message=String(body.message||"").trim(),images=Array.isArray(body.images)?body.images.slice(0,4):[];
  if(!message&&!images.length)throw new HttpError(400,"Upload a chart screenshot or ask a trading question.");
@@ -45,8 +46,8 @@ async function handleApi(req,res,url){
  const history=Array.isArray(body.history)?body.history.slice(-16).filter(x=>x&&["user","assistant","model"].includes(x.role)&&typeof x.content==="string"):[];
  const parts=[{text:message||"Analyze this trading chart screenshot carefully."}];let total=0;
  for(const item of images){const raw=String(item?.data||""),m=raw.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);if(!m)throw new HttpError(400,"Use PNG, JPG or WEBP screenshots only.");const bytes=Buffer.from(m[2],"base64");total+=bytes.length;if(!bytes.length||bytes.length>8*1024*1024||total>16*1024*1024)throw new HttpError(413,"Each image must be under 8 MB and total image size under 16 MB.");parts.push({inlineData:{mimeType:m[1],data:m[2]}});}
- const result=await callHuggingFace(history,parts),reply=result.answer,saved=await saveAnalysis(auth.token,auth.user,body,reply);
- return json(res,200,{reply,model:result.model,provider:"Hugging Face",signal:signalOf(reply),confidence:confidenceOf(reply),...saved});
+ const result=await callOpenAI(history,parts),reply=result.answer,saved=await saveAnalysis(auth.token,auth.user,body,reply);
+ return json(res,200,{reply,model:result.model,provider:"OpenAI",signal:signalOf(reply),confidence:confidenceOf(reply),...saved});
 }
 const MIME={".html":"text/html; charset=utf-8",".css":"text/css; charset=utf-8",".js":"text/javascript; charset=utf-8",".svg":"image/svg+xml",".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp",".ico":"image/x-icon",".json":"application/json; charset=utf-8"};
 async function staticFile(req,res,url){
@@ -57,4 +58,4 @@ async function staticFile(req,res,url){
  try{const content=await fs.readFile(target),ext=path.extname(target).toLowerCase();res.writeHead(200,{"Content-Type":MIME[ext]||"application/octet-stream","Cache-Control":ext===".html"?"no-store":"public, max-age=300","X-Content-Type-Options":"nosniff","Referrer-Policy":"strict-origin-when-cross-origin","X-Frame-Options":"DENY"});res.end(content);}catch{json(res,404,{error:"Not found."});}
 }
 const server=http.createServer(async(req,res)=>{const url=new URL(req.url||"/","http://"+(req.headers.host||"localhost"));try{if(url.pathname.startsWith("/api/")){await handleApi(req,res,url);return;}if(req.method!=="GET"&&req.method!=="HEAD")return json(res,405,{error:"Method not allowed."});await staticFile(req,res,url);}catch(e){const status=Number(e.status||500);if(status>=500)console.error("Trade-Me request failed:",e.message||e);if(!res.headersSent)json(res,status,{error:status>=500&&status!==503?"Trade-Me could not complete that request. Please retry.":e.message});else res.end();}});
-server.listen(PORT,"0.0.0.0",()=>console.log("Trade-Me listening on "+PORT+"; Hugging Face model "+(process.env.HF_MODEL||"Qwen/Qwen2.5-VL-7B-Instruct")));
+server.listen(PORT,"0.0.0.0",()=>console.log("Trade-Me listening on "+PORT+"; OpenAI model "+(process.env.OPENAI_MODEL||"gpt-4o")));
