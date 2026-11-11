@@ -102,7 +102,7 @@ async function callCloudflare(history, parts) {
     ?? data.result?.content
     ?? data.response;
   const answer = Array.isArray(raw)
-    ? raw.map(x => typeof x === "string" ? x : (x?.text || x?.content || "")).join("\\n").trim()
+    ? raw.map(x => typeof x === "string" ? x : (x?.text || x?.content || "")).join("\n").trim()
     : typeof raw === "string" ? raw.trim()
     : raw && typeof raw === "object" ? String(raw.text || raw.content || "").trim()
     : "";
@@ -197,8 +197,8 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     const status = Number(e.status || 500);
     if (status >= 500) console.error("Trade-Me request failed:", e.message || e);
-    if (!res.headersSent) json(res, status, { error: status >= 500 && status !== 503 ? "Trade-Me could not complete that request. Please retry." : e.message });
+    if (!res.headersSent) json(res, status, { error: e instanceof HttpError ? e.message : "Trade-Me could not complete that request. Please retry." });
     else res.end();
   }
 });
-server.listen(PORT, "0.0.0.0", () => console.log("Trade-Me listening on " + PORT + "; Cloudflare Workers AI " + CLOUDFLARE_MODEL));
+server.listen(PORT, "0.0.0.0", () => console.log("Trade-Me listening on " + PORT + "; Cloudflare AI Gateway · " + CLOUDFLARE_MODEL));
