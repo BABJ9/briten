@@ -10,7 +10,7 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
-const CLOUDFLARE_MODEL = "@cf/qwen/qwen3.8-27b";
+const CLOUDFLARE_MODEL = process.env.CLOUDFLARE_MODEL || "google-ai-studio/gemini-2.5-flash";
 const CLOUDFLARE_URL = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`;
 const MAX_BODY = 36 * 1024 * 1024;
 
@@ -76,25 +76,40 @@ async function callCloudflare(history, parts) {
     r = await fetch(CLOUDFLARE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + CLOUDFLARE_API_TOKEN },
-      body: JSON.stringify({ model: CLOUDFLARE_MODEL, messages, temperature: 0.2, max_tokens: 1800 }),
+      body: JSON.stringify({ model: CLOUDFLARE_MODEL, messages, temperature: 0.2, max_tokens: 2400, stream: false }),
       signal: AbortSignal.timeout(90000)
     });
   } catch (e) {
     throw new HttpError(502, e.name === "TimeoutError" ? "Cloudflare AI took too long. Please retry." : "Cloudflare AI is temporarily unreachable.");
   }
   const data = await r.json().catch(() => ({}));
-  if (!r.ok || data.success === false) {
-    const detail = (data.errors || []).map(x => x.message).filter(Boolean).join("; ") || "Cloudflare rejected the request.";
-    console.error("Cloudflare AI error:", r.status, detail.slice(0, 300));
-    throw new HttpError(r.status === 429 ? 429 : 502, r.status === 401 || r.status === 403
-      ? "Cloudflare authentication failed. Check the Workers AI token permissions."
-      : detail.includes("license") || detail.includes("License")
-        ? "Cloudflare requires you to accept the model's Meta license before its first use."
-        : "Cloudflare AI could not complete the request. Check the model and account configuration.");
+  const providerErrors = Array.isArray(data.errors) ? data.errors.map(x => x?.message).filter(Boolean) : [];
+  const detail = data.error?.message || data.message || providerErrors.join("; ") || "The AI provider rejected the request.";
+  if (!r.ok || data.success === false || data.error) {
+    console.error("Cloudflare Gemini error:", r.status, String(detail).slice(0, 500));
+    if (r.status === 401 || r.status === 403) {
+      throw new HttpError(502, "Cloudflare AI Gateway authentication or permission failed. Check the API token has AI Gateway access.");
+    }
+    if (r.status === 402 || /billing|credit|payment|provider credentials|required/i.test(String(detail))) {
+      throw new HttpError(502, "Cloudflare AI Gateway needs billing credits or a stored Google AI Studio API key for Gemini.");
+    }
+    if (r.status === 429) throw new HttpError(429, "Gemini is rate-limited right now. Please retry shortly.");
+    throw new HttpError(502, "Gemini request failed: " + String(detail).slice(0, 220));
   }
-  const raw = data.choices?.[0]?.message?.content ?? data.result?.response ?? data.result?.output_text ?? data.result?.content ?? data.response;
-  const answer = Array.isArray(raw) ? raw.map(x => x.text || "").join("\n").trim() : String(raw || "").trim();
-  if (!answer) throw new HttpError(502, "Cloudflare AI returned an empty analysis. Please retry with a clearer screenshot.");
+  const raw = data.choices?.[0]?.message?.content
+    ?? data.result?.response
+    ?? data.result?.output_text
+    ?? data.result?.content
+    ?? data.response;
+  const answer = Array.isArray(raw)
+    ? raw.map(x => typeof x === "string" ? x : (x?.text || x?.content || "")).join("\\n").trim()
+    : typeof raw === "string" ? raw.trim()
+    : raw && typeof raw === "object" ? String(raw.text || raw.content || "").trim()
+    : "";
+  if (!answer) {
+    console.error("Cloudflare Gemini returned no text:", JSON.stringify({ keys:Object.keys(data || {}), finish_reason:data.choices?.[0]?.finish_reason || null }).slice(0, 500));
+    throw new HttpError(502, "Gemini returned an empty reply. Retry with a clearer screenshot or shorter question.");
+  }
   return { answer, model: CLOUDFLARE_MODEL };
 }
 
@@ -127,7 +142,7 @@ async function handleApi(req, res, url) {
         authentication: Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY),
         database: Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY),
         ai: Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN),
-        provider: "Cloudflare Workers AI", model: CLOUDFLARE_MODEL
+        provider: "Cloudflare AI Gateway · Google Gemini", model: CLOUDFLARE_MODEL
       }
     });
   }
@@ -153,7 +168,7 @@ async function handleApi(req, res, url) {
   const result = await callCloudflare(history, parts);
   const reply = result.answer;
   const saved = await saveAnalysis(auth.token, auth.user, body, reply);
-  return json(res, 200, { reply, model: result.model, provider: "Cloudflare Workers AI", signal: signalOf(reply), confidence: confidenceOf(reply), ...saved });
+  return json(res, 200, { reply, model: result.model, provider: "Cloudflare AI Gateway · Google Gemini", signal: signalOf(reply), confidence: confidenceOf(reply), ...saved });
 }
 
 const MIME = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".ico": "image/x-icon", ".json": "application/json; charset=utf-8" };
