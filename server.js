@@ -52,11 +52,11 @@ async function requireUser(req) {
 const SYSTEM_PROMPT = "You are Trade-Me's institutional-style technical analysis engine. Produce a clear, disciplined trading terminal report inspired by the depth and information hierarchy of leading professional exchange chart-analysis screens, but do not mention, imitate logos, or claim affiliation with any exchange or third-party service. Analyze ONLY what is visible in uploaded chart screenshots and details supplied by the user. Do not claim live market access, current prices, order-book data, funding, open interest, news, or indicator values unless explicitly visible/provided. Never fabricate price levels, candles, indicators, timestamps or market data. If the screenshot is blurry, cropped, missing its price scale, or ambiguous, clearly state the limitation and default to WAIT.\n\nFor every chart analysis use this exact structured report, with concise, specific bullet points:\n1. MARKET SNAPSHOT — asset/pair and timeframe (use Unknown if not shown), visible price context, session/context only if evidenced.\n2. TREND & MARKET STRUCTURE — bullish/bearish/ranging; swing highs/lows; HH/HL or LH/LL; BOS/CHOCH only when clearly evidenced; momentum and candle behaviour.\n3. KEY LEVELS — support, resistance, supply/demand or liquidity zones; give exact prices only when readable, otherwise describe the zone without guessing.\n4. INDICATOR READ — interpret only indicators visibly present and legible; otherwise say Not visible.\n5. TRADE PLAN — BIAS: exactly BUY, SELL, WAIT or NEUTRAL; setup type; entry or entry zone; stop/invalidation; TP1, TP2 and TP3 if justified; estimated risk/reward only when levels allow calculation. For every unavailable level write Not reliably identifiable. Never force a trade.\n6. CONFIRMATION CHECKLIST — concrete candle close, retest, breakout, rejection or momentum evidence needed before entry.\n7. INVALIDATION & RISK — what would disprove the setup, nearby opposing levels, volatility/stop placement cautions, and why standing aside may be better.\n8. CONFIDENCE — 0–100 score for the quality/completeness of the visible evidence, NOT a probability of profit or win rate; explain the score.\n9. FINAL VERDICT — one-line actionable summary: BUY / SELL / WAIT / NEUTRAL, with the key reason.\n\nKeep the analysis balanced and avoid false precision. If the user asks a follow-up question, answer conversationally but preserve the same evidence-only discipline. Never promise profit, guarantee accuracy, or encourage reckless leverage. This is educational chart interpretation, not personalized financial advice. Do not give financial advice disclaimers repeatedly; keep one concise risk reminder when relevant.";
 
 function signalOf(s) {
-  const m = s.match(/(?:TRADE BIAS|BIAS|SIGNAL)\\s*[:：-]*\\s*(BUY|SELL|WAIT|NEUTRAL)/i);
+  const m = s.match(/(?:TRADE BIAS|BIAS|SIGNAL)\s*[:：-]*\s*(BUY|SELL|WAIT|NEUTRAL)/i);
   return m ? m[1].toUpperCase() : "WAIT";
 }
 function confidenceOf(s) {
-  const m = s.match(/CONFIDENCE\\s*[:：-]*\\s*(\\d{1,3})\\s*%?/i);
+  const m = s.match(/CONFIDENCE\s*[:：-]*\s*(\d{1,3})\s*%?/i);
   return m ? Math.min(100, Number(m[1])) : null;
 }
 
@@ -143,7 +143,7 @@ async function handleApi(req, res, url) {
   let total = 0;
   for (const item of images) {
     const raw = String(item?.data || "");
-    const m = raw.match(/^data:(image\\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
+    const m = raw.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
     if (!m) throw new HttpError(400, "Use PNG, JPG or WEBP screenshots only.");
     const bytes = Buffer.from(m[2], "base64");
     total += bytes.length;
@@ -163,8 +163,8 @@ async function staticFile(req, res, url) {
     res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
     return res.end("window.TRADEME_CONFIG=" + JSON.stringify(cfg) + ";");
   }
-  const relative = url.pathname === "/" ? "index.html" : (url.pathname === "/login" || url.pathname === "/login/") ? "login.html" : decodeURIComponent(url.pathname).replace(/^\\/+/, "");
-  if (relative.includes("..") || relative.includes("\\\\") || relative.startsWith("api/")) return json(res, 404, { error: "Not found." });
+  const relative = url.pathname === "/" ? "index.html" : (url.pathname === "/login" || url.pathname === "/login/") ? "login.html" : decodeURIComponent(url.pathname).replace(/^\/+/, "");
+  if (relative.includes("..") || relative.includes("\\") || relative.startsWith("api/")) return json(res, 404, { error: "Not found." });
   const target = path.join(PUBLIC, relative);
   if (!target.startsWith(PUBLIC + path.sep)) return json(res, 404, { error: "Not found." });
   try {
