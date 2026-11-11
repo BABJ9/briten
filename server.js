@@ -354,9 +354,6 @@ async function handleApi(req, res, url) {
     return json(res, 200, { analysis: textAnalysis.trim(), model: result.model || FREE_AI_MODEL, provider: "OVHcloud AI Endpoints", source: "Uploaded image snapshot" });
   }
 
-  if (route === "/api/ai/image-generation" && method === "POST") {
-    throw new HttpError(503, "Image generation is not included in the free text-and-vision model. Chat and uploaded chart analysis remain available.");
-  }
   if (route === "/api/trading/signals" && method === "GET") {
     await settleExpiredTradeSignals(user.id);
     const signals = await dbSelect("aurapay_trade_signals", {
