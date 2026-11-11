@@ -10,7 +10,7 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
-const CLOUDFLARE_MODEL = process.env.CLOUDFLARE_MODEL || "google-ai-studio/gemini-2.5-flash";
+const CLOUDFLARE_MODEL = process.env.CLOUDFLARE_MODEL || "@cf/google/gemma-4-26b-a4b-it";
 const CLOUDFLARE_URL = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`;
 const MAX_BODY = 36 * 1024 * 1024;
 
@@ -86,15 +86,15 @@ async function callCloudflare(history, parts) {
   const providerErrors = Array.isArray(data.errors) ? data.errors.map(x => x?.message).filter(Boolean) : [];
   const detail = data.error?.message || data.message || providerErrors.join("; ") || "The AI provider rejected the request.";
   if (!r.ok || data.success === false || data.error) {
-    console.error("Cloudflare Gemini error:", r.status, String(detail).slice(0, 500));
+    console.error("Cloudflare Gemma error:", r.status, String(detail).slice(0, 500));
     if (r.status === 401 || r.status === 403) {
-      throw new HttpError(502, "Cloudflare AI Gateway authentication or permission failed. Check the API token has AI Gateway access.");
+      throw new HttpError(502, "Cloudflare Workers AI authentication or permission failed. Check the API token has Workers AI access.");
     }
     if (r.status === 402 || /billing|credit|payment|provider credentials|required/i.test(String(detail))) {
-      throw new HttpError(502, "Cloudflare AI Gateway needs billing credits or a stored Google AI Studio API key for Gemini.");
+      throw new HttpError(502, "Cloudflare Workers AI account needs available credits or active billing for Gemma.");
     }
-    if (r.status === 429) throw new HttpError(429, "Gemini is rate-limited right now. Please retry shortly.");
-    throw new HttpError(502, "Gemini request failed: " + String(detail).slice(0, 220));
+    if (r.status === 429) throw new HttpError(429, "Gemma is rate-limited right now. Please retry shortly.");
+    throw new HttpError(502, "Gemma request failed: " + String(detail).slice(0, 220));
   }
   const raw = data.choices?.[0]?.message?.content
     ?? data.result?.response
@@ -107,8 +107,8 @@ async function callCloudflare(history, parts) {
     : raw && typeof raw === "object" ? String(raw.text || raw.content || "").trim()
     : "";
   if (!answer) {
-    console.error("Cloudflare Gemini returned no text:", JSON.stringify({ keys:Object.keys(data || {}), finish_reason:data.choices?.[0]?.finish_reason || null }).slice(0, 500));
-    throw new HttpError(502, "Gemini returned an empty reply. Retry with a clearer screenshot or shorter question.");
+    console.error("Cloudflare Gemma returned no text:", JSON.stringify({ keys:Object.keys(data || {}), finish_reason:data.choices?.[0]?.finish_reason || null }).slice(0, 500));
+    throw new HttpError(502, "Gemma returned an empty reply. Retry with a clearer screenshot or shorter question.");
   }
   return { answer, model: CLOUDFLARE_MODEL };
 }
@@ -142,7 +142,7 @@ async function handleApi(req, res, url) {
         authentication: Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY),
         database: Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY),
         ai: Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN),
-        provider: "Cloudflare AI Gateway · Google Gemini", model: CLOUDFLARE_MODEL
+        provider: "Cloudflare Workers AI · Google Gemma", model: CLOUDFLARE_MODEL
       }
     });
   }
@@ -168,7 +168,7 @@ async function handleApi(req, res, url) {
   const result = await callCloudflare(history, parts);
   const reply = result.answer;
   const saved = await saveAnalysis(auth.token, auth.user, body, reply);
-  return json(res, 200, { reply, model: result.model, provider: "Cloudflare AI Gateway · Google Gemini", signal: signalOf(reply), confidence: confidenceOf(reply), ...saved });
+  return json(res, 200, { reply, model: result.model, provider: "Cloudflare Workers AI · Google Gemma", signal: signalOf(reply), confidence: confidenceOf(reply), ...saved });
 }
 
 const MIME = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".ico": "image/x-icon", ".json": "application/json; charset=utf-8" };
@@ -201,4 +201,4 @@ const server = http.createServer(async (req, res) => {
     else res.end();
   }
 });
-server.listen(PORT, "0.0.0.0", () => console.log("Trade-Me listening on " + PORT + "; Cloudflare AI Gateway · " + CLOUDFLARE_MODEL));
+server.listen(PORT, "0.0.0.0", () => console.log("Trade-Me listening on " + PORT + "; Cloudflare Workers AI · " + CLOUDFLARE_MODEL));
