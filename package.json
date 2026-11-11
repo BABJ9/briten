@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Trade-Me trading screenshot analysis powered by Cloudflare AI Gateway Gemini, with Supabase authentication and saved analysis history.",
+  "description": "Trade-Me trading screenshot analysis powered exclusively by Cloudflare Workers AI Gemma, with Supabase authentication and saved analysis history.",
   "engines": {
     "node": ">=22.0.0"
   },
