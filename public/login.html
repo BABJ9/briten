@@ -1,97 +1,79 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Sign in — Aster AI</title>
-  <link rel="stylesheet" href="/theme.css">
-  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js" defer></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#090a12">
+<title>Sign in — Aster AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark;--bg:#090a12;--text:#f5f4ff;--muted:#9699b2;--line:#302d49;--violet:#bda4ff}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at 50% 0,#292047 0,transparent 48%),var(--bg);color:var(--text);font-family:'DM Sans',sans-serif}
+.card{width:min(440px,100%);padding:clamp(25px,6vw,42px);border:1px solid #ffffff16;border-radius:25px;background:linear-gradient(145deg,#171827f2,#10111df5);box-shadow:0 28px 100px #0008}
+.brand{display:flex;align-items:center;gap:13px;margin-bottom:40px}.mark{width:44px;height:44px;display:grid;place-items:center;border-radius:15px;background:linear-gradient(145deg,#c7aaff,#7772d6);color:#171329;font-size:28px;box-shadow:0 0 34px #a18cff55}.brand b{display:block;font:800 24px 'Manrope',sans-serif;letter-spacing:-1.3px}.brand small{display:block;margin-top:2px;color:#9691b5;font-size:9px;letter-spacing:2px}
+.kicker{color:#bba6f2;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase}h1{margin:11px 0 10px;font:750 clamp(29px,7vw,36px)/1.15 'Manrope',sans-serif;letter-spacing:-1.5px}.intro{margin:0 0 28px;color:var(--muted);font-size:14px;line-height:1.7}
+label{display:block;margin-bottom:9px;color:#c9c6dc;font-size:12px;font-weight:650}.field{width:100%;height:52px;padding:0 15px;border:1px solid #393650;border-radius:12px;outline:0;background:#0e101b;color:var(--text);font:14px 'DM Sans',sans-serif}.field:focus{border-color:#8c78ce;box-shadow:0 0 0 3px #9d82f51a}.submit{width:100%;height:51px;margin-top:14px;border:0;border-radius:12px;background:linear-gradient(105deg,#c5aaff,#8a82e2);color:#171329;font-size:14px;font-weight:800;cursor:pointer}.submit:disabled{opacity:.55;cursor:wait}.status{display:none;margin-top:16px;padding:12px 13px;border-radius:11px;font-size:12px;line-height:1.6}.status.show{display:block}.status.ok{border:1px solid #39765f;background:#173126;color:#b4f0d2}.status.error{border:1px solid #7b4149;background:#351b24;color:#ffc0c5}.foot{margin:22px 0 0;color:#777b94;text-align:center;font-size:10px;line-height:1.7}.spark{position:fixed;color:#bda8ff;opacity:.6;pointer-events:none}.spark.one{top:14%;left:13%;font-size:23px}.spark.two{right:12%;bottom:17%;font-size:17px}
+</style>
 </head>
 <body>
-  <main style="min-height:100vh;display:grid;place-items:center;padding:22px">
-    <section class="panel" style="width:min(430px,100%);padding:30px" x-data="authScreen()" x-init="init()">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:34px">
-        <div class="brandmark">T</div>
-        <div><div style="font-weight:800;letter-spacing:-.03em;font-size:19px">trade<span class="gold">-me</span></div><div class="small-label">Your intelligent AI companion.</div></div>
-      </div>
-      <div class="eyebrow">Secure access</div>
-      <h1 style="font-size:30px;letter-spacing:-.05em;margin:10px 0">Welcome back to Aster.</h1>
-      <p class="muted" style="font-size:14px;line-height:1.6;margin-bottom:25px">Sign in or create your account with a secure sign-in link sent to your email.</p>\n      
-      <form @submit.prevent="send()">
-        <label class="small-label" for="email">Email address</label>
-        <input class="field" style="margin:8px 0 14px" id="email" type="email" x-model="email" autocomplete="email" placeholder="you@example.com" required :disabled="sent">
-        <button class="btn btn-gold" style="width:100%" type="submit" :disabled="busy || sent" x-text="busy?'Please wait…':sent?'Email link sent':'Send secure sign-in link'"></button>
-      </form>
-      <p x-show="sent" class="muted" style="font-size:13px;line-height:1.6;margin:14px 0">A secure sign-in link has been sent. Check your inbox and spam folder, then open the link on this device. It will return you to Aster.</p>
-      <button x-show="sent" class="btn btn-ghost" style="width:100%;margin-top:10px" @click="sent=false;message='';error=''">Use another email</button>
-      <p class="muted" style="font-size:11px;line-height:1.6;text-align:center;margin:20px 0 0">Protected by Supabase email authentication. Never forward your sign-in link.</p>
-      <p x-show="message" x-text="message" style="color:var(--green);font-size:13px;margin-top:14px"></p>
-      <p x-show="error" x-text="error" style="color:#ff9696;font-size:13px;margin-top:14px"></p>
-    </section>
-  </main>
-  <script src="/config.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
-  <script>
-    if (window.AURAPAY_CONFIG?.supabaseUrl && window.AURAPAY_CONFIG?.supabasePublishableKey && window.supabase?.createClient) {
-      window.aurapaySupabase = window.supabase.createClient(window.AURAPAY_CONFIG.supabaseUrl, window.AURAPAY_CONFIG.supabasePublishableKey);
-    }
-    async function resolveAsterSession(client) {
-      // Supabase may return either a PKCE code or tokens in the URL fragment.
-      let result = await client.auth.getSession();
-      if (result.error) throw result.error;
-      if (result.data?.session) return result.data.session;
-      const code = new URLSearchParams(location.search).get('code');
-      if (code) {
-        const exchanged = await client.auth.exchangeCodeForSession(code);
-        if (exchanged.error) throw exchanged.error;
-        if (exchanged.data?.session) return exchanged.data.session;
-      }
-      // Give the auth client time to finish processing a magic-link callback.
-      return await new Promise(resolve => {
-        let finished = false;
-        let subscription;
-        const finish = session => {
-          if (finished) return;
-          finished = true;
-          clearTimeout(timer);
-          subscription?.unsubscribe();
-          resolve(session || null);
-        };
-        const timer = setTimeout(() => finish(null), 12000);
-        const listener = client.auth.onAuthStateChange((event, session) => {
-          if (session && ['SIGNED_IN', 'INITIAL_SESSION', 'TOKEN_REFRESHED', 'PASSWORD_RECOVERY'].includes(event)) finish(session);
-        });
-        subscription = listener.data?.subscription;
-        client.auth.getSession().then(({data}) => { if (data?.session) finish(data.session); }).catch(() => {});
+<span class="spark one">✦</span><span class="spark two">✧</span>
+<main class="card">
+  <div class="brand"><span class="mark">✳</span><span><b>aster</b><small>YOUR AI COMPANION</small></span></div>
+  <div class="kicker">A space to think, create and explore</div>
+  <h1>Welcome back.</h1>
+  <p class="intro">Sign in to continue your conversations with Aster. We'll send a secure one-time link to your email.</p>
+  <form id="loginForm">
+    <label for="email">Email address</label>
+    <input class="field" id="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+    <button class="submit" id="submit" type="submit">Send secure sign-in link</button>
+  </form>
+  <div class="status" id="status" role="status" aria-live="polite"></div>
+  <p class="foot">Protected by Supabase email authentication.<br>Never share your sign-in link with anyone.</p>
+</main>
+<script src="/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
+<script>
+(() => {
+  const status = document.getElementById("status");
+  const button = document.getElementById("submit");
+  const show = (message, type) => { status.textContent = message; status.className = "status show " + type; };
+  const config = window.AURAPAY_CONFIG || {};
+  if (!config.supabaseUrl || !config.supabasePublishableKey || !window.supabase?.createClient) {
+    show("Aster sign-in is not configured yet. Please contact the app administrator.", "error");
+    button.disabled = true;
+    return;
+  }
+  const client = window.supabase.createClient(config.supabaseUrl, config.supabasePublishableKey);
+  client.auth.getSession().then(({data,error}) => {
+    if (error) throw error;
+    if (data.session?.user) location.replace("/");
+  }).catch(error => show(error.message || "Could not check your session.", "error"));
+  client.auth.onAuthStateChange((event, session) => {
+    if (session?.user && ["SIGNED_IN","INITIAL_SESSION","TOKEN_REFRESHED"].includes(event)) location.replace("/");
+  });
+  document.getElementById("loginForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    button.disabled = true;
+    button.textContent = "Sending link…";
+    status.className = "status";
+    try {
+      const email = document.getElementById("email").value.trim().toLowerCase();
+      const {error} = await client.auth.signInWithOtp({
+        email,
+        options: {shouldCreateUser:true, emailRedirectTo:location.origin + "/"}
       });
+      if (error) throw error;
+      show("Your secure sign-in link is on its way. Open the email on this device to continue to Aster.", "ok");
+      button.textContent = "Link sent";
+    } catch (error) {
+      show(error.message || "Could not send your sign-in link. Please try again.", "error");
+      button.disabled = false;
+      button.textContent = "Send secure sign-in link";
     }
-
-        function authScreen() {
-      return {
-        email:'', busy:false, sent:false, error:'', message:'',
-        async init() {
-          if (!window.aurapaySupabase) { this.error='Supabase is not configured yet. Add the public Supabase URL and publishable key to Render.'; return; }
-          try {
-            const session = await resolveAsterSession(window.aurapaySupabase);
-            if (session?.user) location.replace('/');
-          } catch (e) { this.error=e.message || 'Could not check your sign-in session. Refresh and try again.'; }
-        },
-        async send() {
-          this.busy=true; this.error=''; this.message='';
-          try {
-            const { error } = await window.aurapaySupabase.auth.signInWithOtp({
-              email:this.email.trim().toLowerCase(),
-              options:{ shouldCreateUser:true, emailRedirectTo: window.location.origin + '/' }
-            });
-            if (error) throw error;
-            this.sent=true;
-            this.message='Open the secure sign-in link in the email on this device. You will be returned to Aster automatically.';
-          } catch (e) {
-            this.error=e.message || 'Could not send a sign-in link. Please try again.';
-          } finally { this.busy=false; }
-        }
-      };
-    }
-  </script>
+  });
+})();
+</script>
 </body>
 </html>
