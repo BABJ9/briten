@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Sign in — Trade-Me</title>
+  <title>Sign in — Aster AI</title>
   <link rel="stylesheet" href="/theme.css">
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js" defer></script>
 </head>
@@ -12,17 +12,17 @@
     <section class="panel" style="width:min(430px,100%);padding:30px" x-data="authScreen()" x-init="init()">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:34px">
         <div class="brandmark">T</div>
-        <div><div style="font-weight:800;letter-spacing:-.03em;font-size:19px">trade<span class="gold">-me</span></div><div class="small-label">Advanced trading intelligence.</div></div>
+        <div><div style="font-weight:800;letter-spacing:-.03em;font-size:19px">trade<span class="gold">-me</span></div><div class="small-label">Your intelligent AI companion.</div></div>
       </div>
       <div class="eyebrow">Secure access</div>
-      <h1 style="font-size:30px;letter-spacing:-.05em;margin:10px 0">Welcome back.</h1>
+      <h1 style="font-size:30px;letter-spacing:-.05em;margin:10px 0">Welcome back to Aster.</h1>
       <p class="muted" style="font-size:14px;line-height:1.6;margin-bottom:25px">Sign in or create your account with a secure sign-in link sent to your email.</p>\n      
       <form @submit.prevent="send()">
         <label class="small-label" for="email">Email address</label>
         <input class="field" style="margin:8px 0 14px" id="email" type="email" x-model="email" autocomplete="email" placeholder="you@example.com" required :disabled="sent">
         <button class="btn btn-gold" style="width:100%" type="submit" :disabled="busy || sent" x-text="busy?'Please wait…':sent?'Email link sent':'Send secure sign-in link'"></button>
       </form>
-      <p x-show="sent" class="muted" style="font-size:13px;line-height:1.6;margin:14px 0">A secure sign-in link has been sent. Check your inbox and spam folder, then open the link on this device. It will return you to Aurapay.</p>
+      <p x-show="sent" class="muted" style="font-size:13px;line-height:1.6;margin:14px 0">A secure sign-in link has been sent. Check your inbox and spam folder, then open the link on this device. It will return you to Aster.</p>
       <button x-show="sent" class="btn btn-ghost" style="width:100%;margin-top:10px" @click="sent=false;message='';error=''">Use another email</button>
       <p class="muted" style="font-size:11px;line-height:1.6;text-align:center;margin:20px 0 0">Protected by Supabase email authentication. Never forward your sign-in link.</p>
       <p x-show="message" x-text="message" style="color:var(--green);font-size:13px;margin-top:14px"></p>
@@ -35,7 +35,7 @@
     if (window.AURAPAY_CONFIG?.supabaseUrl && window.AURAPAY_CONFIG?.supabasePublishableKey && window.supabase?.createClient) {
       window.aurapaySupabase = window.supabase.createClient(window.AURAPAY_CONFIG.supabaseUrl, window.AURAPAY_CONFIG.supabasePublishableKey);
     }
-    async function resolveAurapaySession(client) {
+    async function resolveAsterSession(client) {
       // Supabase may return either a PKCE code or tokens in the URL fragment.
       let result = await client.auth.getSession();
       if (result.error) throw result.error;
@@ -72,7 +72,7 @@
         async init() {
           if (!window.aurapaySupabase) { this.error='Supabase is not configured yet. Add the public Supabase URL and publishable key to Render.'; return; }
           try {
-            const session = await resolveAurapaySession(window.aurapaySupabase);
+            const session = await resolveAsterSession(window.aurapaySupabase);
             if (session?.user) location.replace('/');
           } catch (e) { this.error=e.message || 'Could not check your sign-in session. Refresh and try again.'; }
         },
@@ -85,7 +85,7 @@
             });
             if (error) throw error;
             this.sent=true;
-            this.message='Open the secure sign-in link in the email on this device. You will be returned to Aurapay automatically.';
+            this.message='Open the secure sign-in link in the email on this device. You will be returned to Aster automatically.';
           } catch (e) {
             this.error=e.message || 'Could not send a sign-in link. Please try again.';
           } finally { this.busy=false; }
