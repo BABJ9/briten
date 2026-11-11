@@ -1,9 +1,9 @@
 {
-  "name": "aurapay-bm",
-  "version": "22.0.0",
+  "name": "aster-ai",
+  "version": "23.0.0",
   "private": true,
   "type": "module",
-  "description": "Aurapay-bm fintech app hosted on Render with Supabase Auth and Postgres.",
+  "description": "Aster AI — a general-purpose AI companion hosted on Render with Supabase authentication and the original Hatchable Gemini model.",
   "engines": {
     "node": ">=22.0.0"
   },
