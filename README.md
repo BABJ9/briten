@@ -1,27 +1,31 @@
-# Aurapay-bm — Render + Supabase
+# Trade-Me — Render + Supabase + Cloudflare Workers AI
 
-Aurapay-bm is a Node.js web app hosted on Render. Supabase provides email OTP authentication and the database. Hugging Face Inference Providers powers screenshot analysis and conversational AI. Bybit public V5 market data supplies the research feed.
-
-## Provider removal
-- The Flutterwave API client, credential lookup, webhook, checkout, virtual-account, card-issuing, recipient-resolution and payout handlers have been removed.
-- Provider-dependent receiving-account, payment-link, send-money and virtual-card screens are disabled.
-- This release does not delete historical wallet, account, payment or ledger records from Supabase.
-- Obsolete Flutterwave variables are no longer read by the app. Remove old keys from Render after verifying the new deployment. Do not replace the entire environment group, because that could erase Supabase and Gemini credentials.
+Trade-Me is a Node.js trading-analysis application hosted on Render. Supabase provides email authentication and saved analysis history. **Cloudflare Workers AI is the only AI provider** and powers both screenshot interpretation and follow-up chat.
 
 ## Runtime
+
 - Node.js 22+
 - Start command: `npm start`
 - Health check: `GET /api/health`
-- Supabase: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and server-only `SUPABASE_SECRET_KEY` (or legacy `SUPABASE_SERVICE_ROLE_KEY`)
-- Hugging Face: `HF_TOKEN` (server-only); optional model override `HF_MODEL` (default `Qwen/Qwen2.5-VL-7B-Instruct`)
-- Bybit public market data requires no private API key.
+- Supabase: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`
+- Cloudflare Workers AI: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` (server-only)
+- Sole model: `@cf/meta/llama-3.2-11b-vision-instruct`
 
-## Trading desk
-The trading desk is focused on 5-minute directional signals. It uses closed Bybit 5-minute candles, with 15m/1h/4h context, EMA/RSI/ATR, volume and order-book checks. Hugging Face provides supporting commentary; the deterministic signal engine emits BUY, SELL or WAIT with entry, stop-loss, take-profit and a confidence score (not a win probability). Signals are stored in Supabase and evaluated against the next completed 5-minute candle for backtesting. It is research-only and does not submit orders. No signal guarantees profit or accuracy.
+Never put the Cloudflare token in frontend code, commit it to Git, or expose it in a client response. The frontend only receives the model/provider label and generated answer.
+
+## Cloudflare setup
+
+1. Create a Cloudflare API token with Workers AI permissions (Workers AI Read or the Workers AI permission recommended in the dashboard).
+2. Set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in the Render service environment.
+3. The first use of the Llama 3.2 11B Vision model may require accepting Meta's license and acceptable-use policy in Cloudflare.
+4. Check `/api/health` and confirm `configured.ai` is true.
+
+## Trading analysis
+
+The model interprets only visible chart evidence and user-provided details. It must not invent live prices, order-book data, indicators, or news. It returns a structured report with BUY, SELL, WAIT or NEUTRAL bias, key levels, confirmation, invalidation and an evidence-quality confidence score. It does not submit orders or guarantee outcomes.
 
 ## Local run
+
 ```bash
-cp .env.example .env
-# Fill in private Supabase and Hugging Face token.
 npm start
 ```
