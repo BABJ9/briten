@@ -8,46 +8,21 @@ const PUBLIC = path.join(ROOT, "public");
 const PORT = Number(process.env.PORT || 3000);
 const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
-const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const MAX_BODY = 36 * 1024 * 1024;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
-
-async function generateGemini(contents, systemInstruction, generationConfig = {}) {
-  if (!GEMINI_API_KEY) throw new HttpError(503, "Aster AI is not connected yet. Add GEMINI_API_KEY in the Render environment settings.");
-  let response;
-  try {
-    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
-      method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: systemInstruction }] }, contents, generationConfig }),
-      signal: AbortSignal.timeout(120000)
-    });
-  } catch (error) {
-    throw new HttpError(502, error.name === "TimeoutError" ? "Aster AI took too long to respond. Please try again." : "Aster AI is temporarily unreachable. Please retry.");
-  }
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new HttpError(502, String(data.error?.message || "Aster AI request failed. Check the Gemini API key and model access.").slice(0, 300));
-  const answer = (data.candidates?.[0]?.content?.parts || []).filter(part => typeof part.text === "string").map(part => part.text).join("\n");
-  if (!answer.trim()) throw new HttpError(502, "Aster AI returned an empty response. Please retry.");
-  return { reply: answer.trim(), model: GEMINI_MODEL };
-}
+const MAX_BODY = 36 * 1024 * 1024;
 
 class HttpError extends Error {
-  constructor(status, message, details = null) {
-    super(message);
-    this.status = status;
-    this.details = details;
-  }
+  constructor(status, message) { super(message); this.status = status; }
 }
 
 function json(res, status, data) {
-  const body = JSON.stringify(data);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff"
   });
-  res.end(body);
+  res.end(JSON.stringify(data));
 }
 
 async function readBody(req) {
@@ -55,408 +30,158 @@ async function readBody(req) {
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY) throw new HttpError(413, "Request body is too large.");
+    if (size > MAX_BODY) throw new HttpError(413, "That message or attachment is too large.");
     chunks.push(chunk);
   }
   if (!chunks.length) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    throw new HttpError(400, "Request body must be valid JSON.");
-  }
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+  catch { throw new HttpError(400, "Request body must be valid JSON."); }
 }
 
 function requiredEnv(...keys) {
-  const missing = keys.filter((key) => !process.env[key]);
-  if (missing.length) throw new HttpError(503, `Server configuration is incomplete: ${missing.join(", ")}.`);
+  const missing = keys.filter(key => !process.env[key]);
+  if (missing.length) throw new HttpError(503, `Aster is not fully configured. Missing: ${missing.join(", ")}.`);
 }
 
 function bearer(req) {
-  const value = String(req.headers.authorization || "");
-  const match = value.match(/^Bearer\s+(.+)$/i);
+  const match = String(req.headers.authorization || "").match(/^Bearer\s+(.+)$/i);
   return match ? match[1] : "";
-}
-
-async function supabaseAuthUser(token) {
-  requiredEnv("SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY");
-  const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: {
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json"
-    },
-    signal: AbortSignal.timeout(12000)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data.id) throw new HttpError(401, "Your session is invalid or has expired. Please sign in again.");
-  return data;
 }
 
 async function requireUser(req) {
   const token = bearer(req);
   if (!token) throw new HttpError(401, "Sign in to continue.");
-  const user = await supabaseAuthUser(token);
-  return { id: user.id, email: user.email || "", name: user.user_metadata?.full_name || user.user_metadata?.name || "" };
+  requiredEnv("SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY");
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${token}`, Accept: "application/json" },
+    signal: AbortSignal.timeout(12000)
+  });
+  const user = await response.json().catch(() => ({}));
+  if (!response.ok || !user.id) throw new HttpError(401, "Your session has expired. Please sign in again.");
+  return user;
 }
 
-async function supabaseRequest(endpoint, { method = "GET", body, prefer = "" } = {}) {
-  requiredEnv("SUPABASE_URL");
-  if (!SUPABASE_SECRET_KEY) throw new HttpError(503, "Server configuration is incomplete: SUPABASE_SECRET_KEY.");
-  const headers = {
-    apikey: SUPABASE_SECRET_KEY,
-    Authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
-    Accept: "application/json"
-  };
-  if (body !== undefined) headers["Content-Type"] = "application/json";
-  if (prefer) headers.Prefer = prefer;
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(15000)
-  });
-  const raw = await response.text();
-  let data = null;
-  try { data = raw ? JSON.parse(raw) : null; } catch { data = { message: raw.slice(0, 300) }; }
+async function generateAster(contents, systemInstruction, generationConfig = {}) {
+  requiredEnv("GEMINI_API_KEY");
+  let response;
+  try {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        contents,
+        generationConfig
+      }),
+      signal: AbortSignal.timeout(120000)
+    });
+  } catch (error) {
+    throw new HttpError(502, error.name === "TimeoutError" ? "Aster took too long to respond. Please try again." : "Aster is temporarily unreachable. Please retry.");
+  }
+  const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message = data?.message || data?.hint || data?.details || "Supabase database request failed.";
-    throw new HttpError(response.status >= 500 ? 503 : 400, String(message).slice(0, 300), data);
+    const message = data.error?.message || "Aster could not complete that request. Check the Gemini API key and model access.";
+    throw new HttpError(response.status === 429 ? 429 : 502, String(message).slice(0, 350));
   }
-  return data;
-}
-
-async function dbSelect(table, params) {
-  return supabaseRequest(`${table}?${new URLSearchParams(params).toString()}`);
-}
-async function dbInsert(table, row) {
-  const rows = await supabaseRequest(table, { method: "POST", body: row, prefer: "return=representation" });
-  return Array.isArray(rows) ? rows[0] : rows;
-}
-async function dbPatch(table, params, patch) {
-  return supabaseRequest(`${table}?${new URLSearchParams(params).toString()}`, {
-    method: "PATCH", body: patch, prefer: "return=representation"
-  });
-}
-async function rpc(name, args) {
-  return supabaseRequest(`rpc/${name}`, { method: "POST", body: args });
-}
-
-function technicalSnapshot(rows, timeframe = "5") {
-  const intervalMs = timeframe === "D" ? 86400000 : timeframe === "W" ? 604800000 : Number(timeframe) * 60000;
-  const candles = (Array.isArray(rows) ? rows : [])
-    .map((row) => ({
-      time: Number(row?.[0]),
-      open: Number(row?.[1]),
-      high: Number(row?.[2]),
-      low: Number(row?.[3]),
-      close: Number(row?.[4]),
-      volume: Number(row?.[5])
-    }))
-    .filter((c) => [c.time, c.open, c.high, c.low, c.close, c.volume].every(Number.isFinite))
-    .filter((c) => c.time + intervalMs <= Date.now())
-    .reverse();
-
-  if (!candles.length) throw new HttpError(502, "Bybit returned no usable candle data.");
-
-  const closes = candles.map((c) => c.close);
-  const ema = (period) => {
-    if (closes.length < period) return null;
-    const alpha = 2 / (period + 1);
-    let value = closes.slice(0, period).reduce((sum, price) => sum + price, 0) / period;
-    for (let i = period; i < closes.length; i++) value = closes[i] * alpha + value * (1 - alpha);
-    return value;
-  };
-
-  const changes = [];
-  for (let i = Math.max(1, closes.length - 14); i < closes.length; i++) {
-    changes.push(closes[i] - closes[i - 1]);
-  }
-  const gains = changes.reduce((sum, change) => sum + Math.max(0, change), 0);
-  const losses = changes.reduce((sum, change) => sum + Math.max(0, -change), 0);
-  const rsi = changes.length
-    ? losses === 0 ? (gains === 0 ? 50 : 100) : 100 - 100 / (1 + gains / losses)
-    : null;
-
-  const last = candles[candles.length - 1];
-  const previous = candles[candles.length - 2] || last;
-  const priorVolumes = candles.slice(-21, -1).map((c) => c.volume);
-  const averageVolume = priorVolumes.length
-    ? priorVolumes.reduce((sum, volume) => sum + volume, 0) / priorVolumes.length
-    : 0;
-  const trueRanges = [];
-  for (let i = Math.max(1, candles.length - 14); i < candles.length; i++) {
-    const current = candles[i];
-    const priorClose = candles[i - 1].close;
-    trueRanges.push(Math.max(
-      current.high - current.low,
-      Math.abs(current.high - priorClose),
-      Math.abs(current.low - priorClose)
-    ));
-  }
-
-  return {
-    last_price: last.close,
-    previous_close: previous.close,
-    ema_20: ema(20),
-    ema_50: ema(50),
-    rsi_14: rsi,
-    volume_ratio: averageVolume > 0 ? last.volume / averageVolume : null,
-    atr_14: trueRanges.length ? trueRanges.reduce((sum, value) => sum + value, 0) / trueRanges.length : null,
-    candle_count: candles.length
-  };
-}
-
-function buildFiveMinuteSignal(market, now = new Date()) {
-  const frames = market.multi_timeframe || {};
-  const bias = (frame) => {
-    if (!frame || frame.ema_20 == null || frame.ema_50 == null) return 0;
-    if (frame.last_price > frame.ema_20 && frame.ema_20 > frame.ema_50) return 1;
-    if (frame.last_price < frame.ema_20 && frame.ema_20 < frame.ema_50) return -1;
-    return 0;
-  };
-  const score = bias(frames["5"]) * 2 + bias(frames["15"]) * 1.5 +
-    bias(frames["60"]) + bias(frames["240"]) * 0.5;
-  const five = frames["5"] || market.technicals || {};
-  const rsiValue = Number(five.rsi_14);
-  const volumeRatio = Number(five.volume_ratio);
-  let adjusted = score;
-  if (Number.isFinite(rsiValue)) {
-    if (rsiValue >= 52 && rsiValue <= 68) adjusted += 1;
-    else if (rsiValue >= 32 && rsiValue <= 48) adjusted -= 1;
-    else if (rsiValue > 75 || rsiValue < 25) adjusted *= 0.65;
-  }
-  if (Number.isFinite(volumeRatio) && volumeRatio >= 1.2) {
-    if (five.last_price > five.previous_close) adjusted += 0.75;
-    else if (five.last_price < five.previous_close) adjusted -= 0.75;
-  }
-  const imbalance = Number(market.orderbook_top5?.imbalance);
-  if (Number.isFinite(imbalance) && imbalance > 0.2) adjusted += 0.5;
-  else if (Number.isFinite(imbalance) && imbalance < -0.2) adjusted -= 0.5;
-
-  const flags = [];
-  if (market.spread_percent != null && market.spread_percent > 0.15) flags.push("Spread is elevated");
-  if (Number.isFinite(volumeRatio) && volumeRatio < 0.6) flags.push("Relative volume is too thin");
-  if (!Number.isFinite(Number(five.atr_14)) || Number(five.atr_14) <= 0) flags.push("ATR is unavailable");
-  if (bias(frames["5"]) === 0) flags.push("Five-minute trend is not aligned");
-  const direction = flags.includes("ATR is unavailable") || flags.includes("Five-minute trend is not aligned") || flags.length >= 2 ? "WAIT" : adjusted >= 4 ? "BUY" : adjusted <= -4 ? "SELL" : "WAIT";
-  const entry = Number(market.last_price || five.last_price);
-  const atr = Number(five.atr_14);
-  const riskDistance = atr > 0 ? atr * 1.25 : null;
-  const stop = direction === "BUY" && riskDistance ? entry - riskDistance
-    : direction === "SELL" && riskDistance ? entry + riskDistance : null;
-  const target = direction === "BUY" && riskDistance ? entry + riskDistance * 1.8
-    : direction === "SELL" && riskDistance ? entry - riskDistance * 1.8 : null;
-  const rawScore = Math.round(Math.min(85, 50 + Math.abs(adjusted) * 5));
-  const confidenceScore = direction === "WAIT" ? Math.min(60, rawScore) : rawScore;
-  const confidenceLabel = confidenceScore >= 78 ? "HIGH" : confidenceScore >= 65 ? "MEDIUM" : "LOW";
-  const generatedAt = now.getTime();
-  const nextFiveMinuteClose = Math.floor(generatedAt / 300000) * 300000 + 300000;
-  const rationale = direction === "WAIT"
-    ? "The five-minute setup does not meet the signal threshold or market-quality checks. No trade is recommended."
-    : `${direction} bias from five-minute EMA structure with higher-timeframe confirmation; RSI ${Number.isFinite(rsiValue) ? rsiValue.toFixed(1) : "n/a"}, relative volume ${Number.isFinite(volumeRatio) ? volumeRatio.toFixed(2) : "n/a"}x.`;
-  return {
-    timeframe: "5",
-    direction,
-    entry_price: Number.isFinite(entry) && entry > 0 ? entry : null,
-    stop_loss: stop != null && stop > 0 ? stop : null,
-    take_profit: target != null && target > 0 ? target : null,
-    confidence_score: confidenceScore,
-    confidence_label: confidenceLabel,
-    evidence_score: Number(adjusted.toFixed(2)),
-    rationale,
-    risk_flags: flags,
-    generated_at: new Date(generatedAt).toISOString(),
-    expires_at: new Date(nextFiveMinuteClose).toISOString()
-  };
-}
-
-async function settleExpiredTradeSignals(userId) {
-  const due = await dbSelect("aurapay_trade_signals", {
-    select: "id,symbol,category,direction,entry_price,stop_loss,take_profit,expires_at",
-    user_id: `eq.${userId}`, outcome_status: "eq.PENDING",
-    expires_at: `lte.${new Date().toISOString()}`, order: "expires_at.asc", limit: "30"
-  });
-  for (const signal of due) {
-    if (signal.direction === "WAIT") {
-      await dbPatch("aurapay_trade_signals", { id: `eq.${signal.id}`, user_id: `eq.${userId}` }, {
-        outcome_status: "UNRESOLVED", outcome_at: new Date().toISOString()
-      });
-      continue;
-    }
-    const expires = new Date(signal.expires_at).getTime();
-    const candleStart = expires - 300000;
-    const query = new URLSearchParams({
-      category: signal.category, symbol: signal.symbol, interval: "5",
-      start: String(candleStart), end: String(expires), limit: "5"
-    });
-    const response = await fetch(`https://api.bybit.com/v5/market/kline?${query}`, { signal: AbortSignal.timeout(10000) });
-    const payload = await response.json().catch(() => ({}));
-    const row = (payload.result?.list || []).find(item => Number(item[0]) === candleStart);
-    if (!response.ok || payload.retCode !== 0 || !row) continue;
-    const high = Number(row[2]), low = Number(row[3]), close = Number(row[4]);
-    const entry = Number(signal.entry_price);
-    const stopHit = signal.direction === "BUY" ? low <= Number(signal.stop_loss) : high >= Number(signal.stop_loss);
-    const targetHit = signal.direction === "BUY" ? high >= Number(signal.take_profit) : low <= Number(signal.take_profit);
-    let outcome = "FLAT";
-    if (stopHit && targetHit) outcome = "AMBIGUOUS";
-    else if (targetHit) outcome = "CORRECT";
-    else if (stopHit) outcome = "INCORRECT";
-    else if (signal.direction === "BUY") outcome = close > entry ? "CORRECT" : close < entry ? "INCORRECT" : "FLAT";
-    else outcome = close < entry ? "CORRECT" : close > entry ? "INCORRECT" : "FLAT";
-    const returnPct = entry > 0 ? (signal.direction === "BUY" ? (close - entry) / entry : (entry - close) / entry) * 100 : null;
-    await dbPatch("aurapay_trade_signals", { id: `eq.${signal.id}`, user_id: `eq.${userId}` }, {
-      outcome_status: outcome, outcome_price: close,
-      outcome_return_pct: returnPct, outcome_at: new Date().toISOString()
-    });
-  }
+  const answer = (data.candidates?.[0]?.content?.parts || [])
+    .filter(part => typeof part.text === "string")
+    .map(part => part.text).join("\n").trim();
+  if (!answer) throw new HttpError(502, "Aster returned an empty response. Please try again.");
+  return { reply: answer, model: GEMINI_MODEL, provider: "Google Gemini", assistant: "Aster" };
 }
 
 async function handleApi(req, res, url) {
-  const route = url.pathname;
-  const method = req.method || "GET";
-  if (route === "/api/health" && method === "GET") {
+  if (url.pathname === "/api/health" && req.method === "GET") {
     return json(res, 200, {
       ok: true,
-      app: "Trade-Me",
+      app: "Aster AI",
       status: "ready",
-      backend: "Supabase",
-      hosting: "Render",
       configured: {
-        supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
-        ai: GEMINI_API_KEY ? `Google Gemini (${GEMINI_MODEL})` : "Gemini key required"
-      },
-      moneyMovement: "disabled-pending-new-provider"
+        authentication: Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY),
+        ai: Boolean(GEMINI_API_KEY),
+        model: GEMINI_MODEL
+      }
     });
   }
 
-  const user = await requireUser(req);
-
-  if (route === "/api/ai/chat" && method === "POST") {
-    const body = await readBody(req);
-    const message = String(body.message || "").trim();
-    const images = Array.isArray(body.images) ? body.images.slice(0, 8) : [];
-    if (!message && !images.length) throw new HttpError(400, "Write a message or attach an image.");
-    if (message.length > 16000) throw new HttpError(400, "Keep messages under 16,000 characters.");
-    const personality = String(body.personality || "Warm, thoughtful, natural and clear").slice(0, 1200);
-    const history = Array.isArray(body.history) ? body.history.slice(-24)
-      .filter(item => item && ["user", "assistant", "model"].includes(item.role) && typeof item.content === "string")
-      .map(item => ({ role: item.role === "assistant" ? "model" : item.role, parts: [{ text: item.content.slice(0, 10000) }] })) : [];
-    const parts = [{ text: message || "Please inspect the attached image and explain what you see." }];
-    let totalBytes = 0;
-    for (const item of images) {
-      const raw = String(item?.data || "");
-      const match = raw.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
-      if (!match) throw new HttpError(400, "Attach PNG, JPG, WEBP or GIF images only.");
-      const bytes = Buffer.from(match[2], "base64");
-      totalBytes += bytes.length;
-      if (!bytes.length || bytes.length > 8 * 1024 * 1024 || totalBytes > 16 * 1024 * 1024) throw new HttpError(413, "Keep each image under 8 MB and total image size under 16 MB.");
-      parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
-    }
-    const mode = String(body.mode || "chat").slice(0, 30);
-    const modeContext = String(body.systemContext || "").slice(0, 1200);
-    const system = "You are Aster, a capable, warm, deeply useful general-purpose AI assistant. This product is an AI assistant, not a fintech, wallet, trading terminal, or formal business dashboard. Help with complex reasoning, conversation, writing, coding, debugging, mathematics, learning, planning, document interpretation and visual understanding. Be curious, accurate, practical and conversational. For difficult tasks, reason carefully and give clear, well-structured answers without exposing private chain-of-thought. Explain assumptions and uncertainty; never invent current facts or claim actions you did not perform. Analyze user-provided images directly. Never ask for passwords, OTPs, API keys, private keys, seed phrases or full card details. Current workspace mode: " + mode + ". " + modeContext + " Response style: " + personality + ".";
-    const result = await generateGemini([...history, { role: "user", parts }], system, { temperature: 0.7, maxOutputTokens: 4096 });
-    return json(res, 200, { ...result, provider: "Google Gemini", assistant: "Aster" });
+  if (url.pathname !== "/api/ai/chat" || req.method !== "POST") {
+    throw new HttpError(404, "Aster endpoint not found.");
   }
 
-  if (route === "/api/ai/snapshot-analysis" && method === "POST") {
-    const body = await readBody(req);
-    const raw = String(body.image || "");
+  await requireUser(req);
+  const body = await readBody(req);
+  const message = String(body.message || "").trim();
+  const images = Array.isArray(body.images) ? body.images.slice(0, 8) : [];
+  if (!message && !images.length) throw new HttpError(400, "Write a message or attach an image.");
+  if (message.length > 16000) throw new HttpError(400, "Keep messages under 16,000 characters.");
+
+  const history = Array.isArray(body.history) ? body.history.slice(-24)
+    .filter(item => item && ["user", "assistant", "model"].includes(item.role) && typeof item.content === "string")
+    .map(item => ({
+      role: item.role === "assistant" ? "model" : item.role,
+      parts: [{ text: item.content.slice(0, 10000) }]
+    })) : [];
+
+  const parts = [{ text: message || "Please inspect the attached image and explain what you see." }];
+  let totalBytes = 0;
+  for (const item of images) {
+    const raw = String(item?.data || "");
     const match = raw.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
-    if (!match) throw new HttpError(400, "Upload a valid PNG, JPG, WEBP or GIF image.");
-    const result = await generateGemini([{ role: "user", parts: [
-      { text: "Inspect this image carefully. Describe visible content, extract readable text, distinguish observation from inference, and identify uncertainty. User notes: " + String(body.notes || "").slice(0, 2000) },
-      { inlineData: { mimeType: match[1], data: match[2] } }
-    ] }], "You are Aster, a careful multimodal AI assistant. Never invent details that are not visible.", { temperature: 0.3, maxOutputTokens: 3000 });
-    return json(res, 200, { analysis: result.reply, model: result.model, provider: "Google Gemini" });
-  }
-
-  if (route === "/api/trading/signals" && method === "GET") {
-    await settleExpiredTradeSignals(user.id);
-    const signals = await dbSelect("aurapay_trade_signals", {
-      select: "id,symbol,category,timeframe,direction,entry_price,stop_loss,take_profit,confidence_score,confidence_label,rationale,generated_at,expires_at,outcome_status,outcome_price,outcome_return_pct,outcome_at",
-      user_id: `eq.${user.id}`, order: "generated_at.desc", limit: "50"
-    });
-    const scored = signals.filter(item => ["CORRECT","INCORRECT","FLAT"].includes(item.outcome_status));
-    const wins = scored.filter(item => item.outcome_status === "CORRECT").length;
-    return json(res, 200, { signals, stats: { evaluated: scored.length, correct: wins, incorrect: scored.filter(item => item.outcome_status === "INCORRECT").length, flat: scored.filter(item => item.outcome_status === "FLAT").length, accuracy_percent: scored.length ? Number((wins / scored.length * 100).toFixed(1)) : null } });
-  }
-
-  if (route === "/api/my-accounts" && method === "GET") {
-    return json(res, 200, { accounts: [], payment_links: [] });
-  }
-
-  if (route === "/api/wallet/balance" && method === "GET") {
-    const [wallets, ledger] = await Promise.all([
-      dbSelect("aurapay_wallets", {
-        select: "currency,available_ngn,pending_ngn,updated_at",
-        user_id: `eq.${user.id}`, limit: "1"
-      }),
-      dbSelect("aurapay_wallet_ledger", {
-        select: "id,reference,entry_type,available_delta,pending_delta,available_after,pending_after,transfer_reference,note,created_at",
-        user_id: `eq.${user.id}`, order: "created_at.desc", limit: "50"
-      })
-    ]);
-    const row = wallets[0] || {};
-    return json(res, 200, {
-      currency: "NGN",
-      available_ngn: Number(row.available_ngn || 0),
-      pending_ngn: Number(row.pending_ngn || 0),
-      updated_at: row.updated_at || null,
-      ledger: ledger.map((item) => ({
-        ...item,
-        available_delta: Number(item.available_delta),
-        pending_delta: Number(item.pending_delta),
-        available_after: Number(item.available_after),
-        pending_after: Number(item.pending_after)
-      }))
-    });
-  }
-
-  if (route === "/api/accounts/crypto" && method === "POST") {
-    return json(res, 423, { suspended: true, error: "Crypto features are temporarily suspended. No crypto wallet or transfer requests are being processed." });
-  }
-  if (route === "/api/accounts/crypto-status" && method === "GET") {
-    return json(res, 423, { suspended: true, error: "Crypto features are temporarily suspended." });
-  }
-
-  if ((route === "/api/currency/rates" || route === "/api/currency") && method === "GET") {
-    const base = String(url.searchParams.get("base") || "NGN").trim().toUpperCase();
-    if (!/^[A-Z]{3}$/.test(base)) throw new HttpError(400, "Use a valid three-letter currency code.");
-    let response, data;
-    try {
-      response = await fetch(`https://open.er-api.com/v6/latest/${encodeURIComponent(base)}`, {
-        headers: { Accept: "application/json" }, signal: AbortSignal.timeout(12000)
-      });
-      data = await response.json();
-    } catch {
-      throw new HttpError(502, "Live exchange-rate service could not be reached. Please retry.");
+    if (!match) throw new HttpError(400, "Attach PNG, JPG, WEBP or GIF images only.");
+    const bytes = Buffer.from(match[2], "base64");
+    totalBytes += bytes.length;
+    if (!bytes.length || bytes.length > 8 * 1024 * 1024 || totalBytes > 16 * 1024 * 1024) {
+      throw new HttpError(413, "Keep each image under 8 MB and total image size under 16 MB.");
     }
-    if (!response.ok || data.result !== "success" || !data.rates) throw new HttpError(502, data["error-type"] || "Exchange rates are unavailable.");
-    return json(res, 200, {
-      base: data.base_code || base, rates: data.rates,
-      updated_at: data.time_last_update_utc || null,
-      next_update_at: data.time_next_update_utc || null,
-      source: "ExchangeRate-API", indicative_only: true
-    });
+    parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
   }
 
-  throw new HttpError(404, "API endpoint not found.");
+  const modes = {
+    chat: "Be a natural, versatile conversational assistant.",
+    writing: "Act as a skilled writing partner. Draft, edit and refine while preserving the user's intent and voice.",
+    code: "Act as a senior software engineering partner. Debug carefully, explain root causes, write maintainable code and identify security concerns.",
+    reason: "Act as an analytical reasoning partner. Examine assumptions, evidence, alternatives and uncertainty.",
+    plan: "Act as a practical planning partner. Turn goals into sequenced, realistic actions."
+  };
+  const mode = String(body.mode || "chat").slice(0, 30);
+  const modeContext = String(body.systemContext || "").slice(0, 1200);
+  const personality = String(body.personality || "Warm, thoughtful, natural and clear").slice(0, 1200);
+  const system = [
+    "You are Aster, a capable, warm, deeply useful general-purpose AI assistant.",
+    "This product is entirely an AI assistant. It is not a fintech app, wallet, trading terminal, payment product, or formal business dashboard.",
+    "Help with conversation, complex reasoning, writing, coding, debugging, mathematics, learning, planning, document interpretation and visual understanding.",
+    "Be curious, accurate, practical and conversational. Adapt your depth to the user's request.",
+    "For difficult tasks, reason carefully and provide clear conclusions and concise explanations without exposing private chain-of-thought.",
+    "Explain assumptions and uncertainty. Never invent current facts or claim actions you did not perform.",
+    "Analyze user-provided images directly. Never ask for passwords, OTPs, API keys, private keys, seed phrases or full card details.",
+    modes[mode] || modes.chat,
+    modeContext,
+    "Response style: " + personality
+  ].filter(Boolean).join("\n");
+  const result = await generateAster(
+    [...history, { role: "user", parts }],
+    system,
+    { temperature: 0.7, maxOutputTokens: 4096 }
+  );
+  return json(res, 200, result);
 }
 
 const MIME = {
-  ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
-  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-  ".webp": "image/webp", ".ico": "image/x-icon", ".json": "application/json; charset=utf-8"
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".json": "application/json; charset=utf-8"
 };
 
 async function staticFile(req, res, url) {
   if (url.pathname === "/config.js") {
-    const config = {
-      supabaseUrl: SUPABASE_URL,
-      supabasePublishableKey: SUPABASE_PUBLISHABLE_KEY
-    };
+    const config = { supabaseUrl: SUPABASE_URL, supabasePublishableKey: SUPABASE_PUBLISHABLE_KEY };
     res.writeHead(200, {
       "Content-Type": "text/javascript; charset=utf-8",
       "Cache-Control": "no-store",
@@ -464,9 +189,10 @@ async function staticFile(req, res, url) {
     });
     return res.end(`window.AURAPAY_CONFIG=${JSON.stringify(config)};`);
   }
-  let relative = url.pathname === "/" ? "index.html" :
-    (url.pathname === "/login" || url.pathname === "/login/") ? "login.html" :
-    decodeURIComponent(url.pathname).replace(/^\/+/, "");
+
+  const relative = url.pathname === "/" ? "index.html"
+    : (url.pathname === "/login" || url.pathname === "/login/") ? "login.html"
+    : decodeURIComponent(url.pathname).replace(/^\/+/, "");
   if (relative.includes("..") || relative.includes("\\") || relative.startsWith("api/")) {
     return json(res, 404, { error: "Not found." });
   }
@@ -495,25 +221,16 @@ const server = http.createServer(async (req, res) => {
       await handleApi(req, res, url);
       return;
     }
-    if (req.method !== "GET" && req.method !== "HEAD") {
-      return json(res, 405, { error: "Method not allowed." });
-    }
+    if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: "Method not allowed." });
     await staticFile(req, res, url);
   } catch (error) {
     const status = Number(error.status || 500);
-    if (status >= 500) console.error("Request failed:", error.message || error);
-    if (!res.headersSent) {
-      json(res, status, {
-        error: status >= 500 && status !== 503 ? "The request could not be completed safely. Please retry." : error.message,
-        ...(error.details && status < 500 ? { details: error.details } : {})
-      });
-    } else {
-      res.end();
-    }
+    if (status >= 500) console.error("Aster request failed:", error.message || error);
+    if (!res.headersSent) json(res, status, {
+      error: status >= 500 && status !== 503 ? "Aster could not complete that request. Please retry." : error.message
+    });
+    else res.end();
   }
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Trade-Me listening on ${PORT}`);
-});
-// Aster AI release: Google Gemini 3 Flash Preview.
+server.listen(PORT, "0.0.0.0", () => console.log(`Aster AI listening on ${PORT} using ${GEMINI_MODEL}`));
