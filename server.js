@@ -10,9 +10,8 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const MAX_BODY = 36 * 1024 * 1024;
-const BAZAAR_BASE_URL = "https://api.bazaarlink.ai/v1";
-const BAZAAR_CHAT_MODEL = process.env.BAZAAR_CHAT_MODEL || "google/gemini-3.5-flash";
-const BAZAAR_IMAGE_MODEL = process.env.BAZAAR_IMAGE_MODEL || "openai/gpt-image-1";
+const FREE_AI_BASE_URL = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1";
+const FREE_AI_MODEL = "Qwen3.6-27B";
 
 class HttpError extends Error {
   constructor(status, message, details = null) {
@@ -305,7 +304,7 @@ async function handleApi(req, res, url) {
       hosting: "Render",
       configured: {
         supabase: !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && SUPABASE_SECRET_KEY),
-        ai: process.env.BAZAARLINK_API_KEY ? "BazaarLink" : "not_configured"
+        ai: "OVHcloud AI Endpoints (anonymous free tier)"
       },
       moneyMovement: "disabled-pending-new-provider"
     });
@@ -314,7 +313,6 @@ async function handleApi(req, res, url) {
   const user = await requireUser(req);
 
   if (route === "/api/ai/chat" && method === "POST") {
-    requiredEnv("BAZAARLINK_API_KEY");
     const body = await readBody(req);
     const message = String(body.message || "").trim();
     if (!message || message.length > 16000) throw new HttpError(400, "Enter a message up to 16,000 characters.");
@@ -326,47 +324,38 @@ async function handleApi(req, res, url) {
       const match = data.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
       if (!match) throw new HttpError(400, "Use PNG, JPG, WEBP or GIF images.");
       const bytes = Buffer.from(match[2], "base64"); totalImageBytes += bytes.length;
-      if (!bytes.length || bytes.length > 12 * 1024 * 1024 || totalImageBytes > 24 * 1024 * 1024) throw new HttpError(413, "Images may be 12 MB each, with 24 MB total per message.");
+      if (!bytes.length || bytes.length > 6 * 1024 * 1024 || totalImageBytes > 8 * 1024 * 1024) throw new HttpError(413, "For this free vision model, keep each image under 6 MB and the total under 8 MB.");
       imageParts.push({ type: "image_url", image_url: { url: data, detail: "auto" } });
     }
     const system = "You are Trade-Me, a capable general-purpose AI assistant for complex reasoning, conversation, writing, coding, debugging, learning and visual understanding. Analyze attached images directly. Be accurate, explain assumptions and uncertainty, and never invent live market data. Never promise trading profits or place orders. Never ask for passwords, OTPs, private keys, seed phrases or full card details. User-selected personality: " + personality + ". Keep accuracy and safety above style.";
     let response;
-    try { response = await fetch(BAZAAR_BASE_URL + "/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + process.env.BAZAARLINK_API_KEY, "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: BAZAAR_CHAT_MODEL, messages: [{ role: "system", content: system }, ...history, { role: "user", content: [{ type: "text", text: message }, ...imageParts] }], temperature: 0.35, max_tokens: 2400, reasoning_effort: "high" }), signal: AbortSignal.timeout(120000) }); }
-    catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Bazaar AI timed out. Please retry." : "Bazaar AI could not be reached. Please retry."); }
+    try { response = await fetch(FREE_AI_BASE_URL + "/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: FREE_AI_MODEL, messages: [{ role: "system", content: system }, ...history, { role: "user", content: [{ type: "text", text: message }, ...imageParts] }], temperature: 0.35, max_tokens: 2400,  }), signal: AbortSignal.timeout(120000) }); }
+    catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Free AI model timed out. Please retry." : "Free AI service is temporarily unavailable. Please retry."); }
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Bazaar AI chat request failed.").slice(0, 280));
+    if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Free AI chat request failed.").slice(0, 280));
     const reply = result.choices?.[0]?.message?.content;
     const textReply = typeof reply === "string" ? reply : Array.isArray(reply) ? reply.filter(p => p.type === "text").map(p => p.text).join("\n") : "";
-    if (!textReply.trim()) throw new HttpError(502, "Bazaar AI returned an empty reply. Please retry.");
-    return json(res, 200, { reply: textReply.trim(), model: result.model || BAZAAR_CHAT_MODEL, provider: "BazaarLink" });
+    if (!textReply.trim()) throw new HttpError(502, "Free AI returned an empty reply. Please retry.");
+    return json(res, 200, { reply: textReply.trim(), model: result.model || FREE_AI_MODEL, provider: "OVHcloud AI Endpoints" });
   }
 
   if (route === "/api/ai/snapshot-analysis" && method === "POST") {
-    requiredEnv("BAZAARLINK_API_KEY"); const body = await readBody(req); const image = String(body.image || "");
+    const body = await readBody(req); const image = String(body.image || "");
     const match = image.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
     if (!match) throw new HttpError(400, "Upload a valid PNG, JPG, WEBP or GIF image.");
-    const bytes = Buffer.from(match[2], "base64"); if (!bytes.length || bytes.length > 12 * 1024 * 1024) throw new HttpError(413, "Snapshot must be smaller than 12 MB.");
+    const bytes = Buffer.from(match[2], "base64"); if (!bytes.length || bytes.length > 7 * 1024 * 1024) throw new HttpError(413, "Snapshot must be smaller than 7 MB for the free vision model.");
     const prompt = "Analyze this actual trading chart image visually. Read only legible values. Separate observed facts, interpretations and unknowns. Cover chart read, market structure, bullish/bearish scenarios, visible levels, possible setup only if supported, invalidation and risk. Do not invent live prices, indicators, news or probabilities. A screenshot is not live market data. Say WAIT/NO TRADE if uncertain. Never promise profits or place orders. Educational analysis only. User notes: " + String(body.notes || "None").slice(0, 2000);
     let response;
-    try { response = await fetch(BAZAAR_BASE_URL + "/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + process.env.BAZAARLINK_API_KEY, "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: BAZAAR_CHAT_MODEL, messages: [{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: image, detail: "high" } }] }], temperature: 0.2, max_tokens: 1800, reasoning_effort: "high" }), signal: AbortSignal.timeout(120000) }); }
-    catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Bazaar vision analysis timed out. Please retry." : "Bazaar AI could not be reached."); }
-    const result = await response.json().catch(() => ({})); if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Bazaar snapshot analysis failed.").slice(0, 280));
+    try { response = await fetch(FREE_AI_BASE_URL + "/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: FREE_AI_MODEL, messages: [{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: image, detail: "high" } }] }], temperature: 0.2, max_tokens: 1800 }), signal: AbortSignal.timeout(120000) }); }
+    catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Free vision model timed out. Please retry." : "Free AI service is temporarily unavailable."); }
+    const result = await response.json().catch(() => ({})); if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Free snapshot analysis failed.").slice(0, 280));
     const analysis = result.choices?.[0]?.message?.content; const textAnalysis = typeof analysis === "string" ? analysis : Array.isArray(analysis) ? analysis.filter(p => p.type === "text").map(p => p.text).join("\n") : "";
-    if (!textAnalysis.trim()) throw new HttpError(502, "Bazaar returned an empty analysis.");
-    return json(res, 200, { analysis: textAnalysis.trim(), model: result.model || BAZAAR_CHAT_MODEL, provider: "BazaarLink", source: "Uploaded image snapshot" });
+    if (!textAnalysis.trim()) throw new HttpError(502, "Free model returned an empty analysis.");
+    return json(res, 200, { analysis: textAnalysis.trim(), model: result.model || FREE_AI_MODEL, provider: "BazaarLink", source: "Uploaded image snapshot" });
   }
 
   if (route === "/api/ai/image-generation" && method === "POST") {
-    requiredEnv("BAZAARLINK_API_KEY"); const body = await readBody(req); const prompt = String(body.prompt || "").trim();
-    if (!prompt || prompt.length > 5000) throw new HttpError(400, "Enter an image prompt up to 5,000 characters.");
-    const allowed = new Set(["1024x1024", "1536x1024", "1024x1536", "2K"]); const size = allowed.has(String(body.size)) ? String(body.size) : "1024x1024";
-    let response;
-    try { response = await fetch(BAZAAR_BASE_URL + "/images/generations", { method: "POST", headers: { "Authorization": "Bearer " + process.env.BAZAARLINK_API_KEY, "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ model: BAZAAR_IMAGE_MODEL, prompt, size, n: 1 }), signal: AbortSignal.timeout(180000) }); }
-    catch (error) { throw new HttpError(502, error.name === "TimeoutError" ? "Image generation timed out. Please retry." : "Bazaar image generation could not be reached."); }
-    const result = await response.json().catch(() => ({})); if (!response.ok) throw new HttpError(502, String(result.error?.message || result.message || "Bazaar image generation failed.").slice(0, 280));
-    const image = result.data?.[0]?.url || (result.data?.[0]?.b64_json ? "data:image/png;base64," + result.data[0].b64_json : "");
-    if (!image) throw new HttpError(502, "Bazaar returned no generated image.");
-    return json(res, 200, { image, model: BAZAAR_IMAGE_MODEL, provider: "BazaarLink" });
+    throw new HttpError(503, "Image generation is not included in the free text-and-vision model. Chat and uploaded chart analysis remain available.");
   }
   if (route === "/api/trading/signals" && method === "GET") {
     await settleExpiredTradeSignals(user.id);
@@ -513,4 +502,4 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Trade-Me listening on ${PORT}`);
 });
-// Render release: BazaarLink multimodal conversational AI and image generation.
+// Render release: anonymous free OVHcloud Qwen vision and chat model.
