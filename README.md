@@ -15,6 +15,8 @@ Never put the Cloudflare token in frontend code, commit it to Git, or expose it 
 
 ## Cloudflare setup
 
+The backend calls the Cloudflare OpenAI-compatible Chat Completions route (`/ai/v1/chat/completions`) so text and `image_url` screenshot content use the same multimodal request format.
+
 1. Create a Cloudflare API token with Workers AI permissions (Workers AI Read or the Workers AI permission recommended in the dashboard).
 2. Set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in the Render service environment.
 3. The first use of the Llama 3.2 11B Vision model may require accepting Meta's license and acceptable-use policy in Cloudflare.
