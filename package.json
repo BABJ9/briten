@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Trade-Me AI trading screenshot analysis powered exclusively by Cloudflare Workers AI, with Supabase authentication and saved analysis history.",
-  "engines": { "node": ">=22.0.0" },
+  "description": "Trade-Me trading screenshot analysis powered by Cloudflare AI Gateway Gemini, with Supabase authentication and saved analysis history.",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "start": "node server.js",
     "check": "node --check server.js && node --check public/app.js",
